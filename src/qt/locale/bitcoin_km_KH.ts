@@ -151,8 +151,8 @@
 <context>
     <name>BitcoinGUI</name>
     <message>
-        <source>Send coins to a Litecoin address</source>
-        <translation>ផ្ញើកាក់ទៅកាន់ អាសយដ្ឋាន Litecoin មួយ</translation>
+        <source>Send coins to a Doriancoin address</source>
+        <translation>ផ្ញើកាក់ទៅកាន់ អាសយដ្ឋាន Doriancoin មួយ</translation>
     </message>
     </context>
 <context>

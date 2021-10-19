@@ -29,9 +29,9 @@ NetworkStyle::NetworkStyle(const QString &_appName, const int iconColorHueShift,
     // load pixmap
     QPixmap pixmap;
     if (std::char_traits<char>::length(_titleAddText) == 0) {
-        pixmap.load(":/icons/bitcoin");
-    } else {
         pixmap.load(":/icons/doriancoin_splash");
+    } else {
+        pixmap.load(":/icons/bitcoin");
     }
 
     if(iconColorHueShift != 0 && iconColorSaturationReduction != 0)
@@ -57,7 +57,7 @@ NetworkStyle::NetworkStyle(const QString &_appName, const int iconColorHueShift,
                 col.getHsl(&h,&s,&l);
 
                 // rotate color on RGB color circle
-                // 70Â° should end up with the typical "testnet" green
+                // 70° should end up with the typical "testnet" green
                 h+=iconColorHueShift;
 
                 // change saturation value

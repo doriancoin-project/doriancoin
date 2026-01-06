@@ -184,4 +184,180 @@ BOOST_AUTO_TEST_CASE(ChainParams_SIGNET_sanity)
     sanity_check_chainparams(*m_node.args, CBaseChainParams::SIGNET);
 }
 
+/* Test that dispatch uses BTC algorithm before LWMA activation */
+BOOST_AUTO_TEST_CASE(lwma_dispatch_before_activation)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    const Consensus::Params& params = chainParams->GetConsensus();
+
+    // Create a block before LWMA activation height
+    CBlockIndex pindexLast;
+    pindexLast.nHeight = params.nLWMAHeight - 2; // One block before activation
+    pindexLast.nTime = 1394325760;
+    pindexLast.nBits = 0x1e0ffff0;
+    pindexLast.pprev = nullptr;
+
+    CBlockHeader header;
+    header.nTime = pindexLast.nTime + params.nPowTargetSpacing;
+
+    // Before activation, GetNextWorkRequired should use BTC algorithm
+    // For non-retarget blocks, BTC algorithm returns previous block's nBits
+    unsigned int result = GetNextWorkRequired(&pindexLast, &header, params);
+    unsigned int btcResult = GetNextWorkRequiredBTC(&pindexLast, &header, params);
+    BOOST_CHECK_EQUAL(result, btcResult);
+}
+
+/* Test that dispatch uses LWMA algorithm after activation */
+BOOST_AUTO_TEST_CASE(lwma_dispatch_after_activation)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Temporarily set a low activation height for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAWindow = 45;
+
+    // Create chain of blocks after LWMA activation
+    const int numBlocks = 50;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nLWMAHeight + i;
+        blocks[i].nTime = 1394325760 + i * params.nPowTargetSpacing;
+        blocks[i].nBits = 0x1e0ffff0;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + params.nPowTargetSpacing;
+
+    // After activation, GetNextWorkRequired should use LWMA algorithm
+    unsigned int result = GetNextWorkRequired(&blocks[numBlocks - 1], &header, params);
+    unsigned int lwmaResult = GetNextWorkRequiredLWMA(&blocks[numBlocks - 1], &header, params);
+    BOOST_CHECK_EQUAL(result, lwmaResult);
+}
+
+/* Test LWMA cold start - insufficient history at activation */
+BOOST_AUTO_TEST_CASE(lwma_cold_start)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation height for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAWindow = 45;
+
+    // Create just 2 blocks after activation (minimal history)
+    std::vector<CBlockIndex> blocks(3);
+
+    // Block before activation
+    blocks[0].pprev = nullptr;
+    blocks[0].nHeight = params.nLWMAHeight - 1;
+    blocks[0].nTime = 1394325760;
+    blocks[0].nBits = 0x1e0ffff0;
+
+    // First LWMA block
+    blocks[1].pprev = &blocks[0];
+    blocks[1].nHeight = params.nLWMAHeight;
+    blocks[1].nTime = blocks[0].nTime + params.nPowTargetSpacing;
+    blocks[1].nBits = 0x1e0ffff0;
+
+    // Second LWMA block
+    blocks[2].pprev = &blocks[1];
+    blocks[2].nHeight = params.nLWMAHeight + 1;
+    blocks[2].nTime = blocks[1].nTime + params.nPowTargetSpacing;
+    blocks[2].nBits = 0x1e0ffff0;
+
+    CBlockHeader header;
+    header.nTime = blocks[2].nTime + params.nPowTargetSpacing;
+
+    // With only 2 blocks of LWMA history, algorithm should still work
+    // and use available blocks (graceful cold start)
+    unsigned int result = GetNextWorkRequiredLWMA(&blocks[2], &header, params);
+
+    // Result should be valid (not zero, not overflow)
+    BOOST_CHECK(result != 0);
+    arith_uint256 target;
+    bool neg, over;
+    target.SetCompact(result, &neg, &over);
+    BOOST_CHECK(!neg && !over);
+}
+
+/* Test LWMA with exactly 1 block of history - should return previous difficulty */
+BOOST_AUTO_TEST_CASE(lwma_single_block_history)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation height for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAWindow = 45;
+
+    // Create single block at activation height
+    CBlockIndex block0;
+    block0.pprev = nullptr;
+    block0.nHeight = params.nLWMAHeight - 1;
+    block0.nTime = 1394325760;
+    block0.nBits = 0x1e0ffff0;
+
+    CBlockIndex block1;
+    block1.pprev = &block0;
+    block1.nHeight = params.nLWMAHeight;
+    block1.nTime = block0.nTime + params.nPowTargetSpacing;
+    block1.nBits = 0x1e0ffff0;
+
+    CBlockHeader header;
+    header.nTime = block1.nTime + params.nPowTargetSpacing;
+
+    // With only 1 block of LWMA history (insufficient for timespan calc),
+    // should return previous block's difficulty
+    unsigned int result = GetNextWorkRequiredLWMA(&block1, &header, params);
+    BOOST_CHECK_EQUAL(result, block1.nBits);
+}
+
+/* Test LWMA solvetime clamping */
+BOOST_AUTO_TEST_CASE(lwma_solvetime_bounds)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation height for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAWindow = 10; // Smaller window for easier testing
+
+    // Create blocks with extreme timestamps
+    const int numBlocks = 15;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nLWMAHeight + i;
+        // Every other block has extreme solvetime (10x target)
+        if (i > 0 && i % 2 == 0) {
+            blocks[i].nTime = blocks[i - 1].nTime + params.nPowTargetSpacing * 10;
+        } else if (i > 0) {
+            blocks[i].nTime = blocks[i - 1].nTime + params.nPowTargetSpacing;
+        } else {
+            blocks[i].nTime = 1394325760;
+        }
+        blocks[i].nBits = 0x1e0ffff0;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + params.nPowTargetSpacing;
+
+    // LWMA should handle extreme solvetimes without producing invalid results
+    unsigned int result = GetNextWorkRequiredLWMA(&blocks[numBlocks - 1], &header, params);
+
+    // Result should be valid (not zero, not overflow)
+    BOOST_CHECK(result != 0);
+    arith_uint256 target;
+    bool neg, over;
+    target.SetCompact(result, &neg, &over);
+    BOOST_CHECK(!neg && !over);
+
+    // Result should be within powLimit
+    BOOST_CHECK(target <= UintToArith256(params.powLimit));
+}
+
 BOOST_AUTO_TEST_SUITE_END()

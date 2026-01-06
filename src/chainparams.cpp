@@ -74,7 +74,7 @@ public:
         consensus.BIP66Height = 302983; // 7aceee012833fa8952f8835d8b1b3ae233cd6ab08fdb27a771d2bd7bdc491894
         consensus.CSVHeight = std::numeric_limits<int>::max();
         consensus.SegwitHeight = std::numeric_limits<int>::max();
-        consensus.nLWMAHeight = 350000; // TODO: Set to desired mainnet activation height
+        consensus.nLWMAHeight = 1243845; // TODO: Set to desired mainnet activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = std::numeric_limits<int>::max(); 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");

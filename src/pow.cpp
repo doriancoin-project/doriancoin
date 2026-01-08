@@ -123,10 +123,11 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     // LWMA calculation
     arith_uint256 sumTarget;
     int64_t t = 0;
-    int64_t j = 0;
 
     const CBlockIndex* pindex = pindexLast;
 
+    // In LWMA, weight should be highest for most recent blocks, lowest for oldest
+    // We iterate from newest to oldest, so weight starts at actualN and decreases
     for (int64_t i = actualN; i > 0; i--) {
         const CBlockIndex* pindexPrev = pindex->pprev;
         if (!pindexPrev) break;
@@ -138,12 +139,12 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
         if (solvetime < -6 * T) solvetime = -6 * T;
         if (solvetime > 6 * T) solvetime = 6 * T;
 
-        j++;
-        t += solvetime * j;
+        // Weight 'i' gives highest weight (actualN) to newest block, lowest (1) to oldest
+        t += solvetime * i;
 
         arith_uint256 target;
         target.SetCompact(pindex->nBits);
-        sumTarget += target / N;
+        sumTarget += target / actualN;
 
         pindex = pindexPrev;
     }
@@ -152,12 +153,9 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     if (t <= 0) t = 1;
 
     // LWMA formula: nextTarget = sumTarget * t / k
-    // where k = N * (N + 1) * T / 2
-    // Rearranged to avoid overflow: nextTarget = sumTarget * t * 2 / (N * (N + 1) * T)
-    // Since we divided by N during accumulation: nextTarget = sumTarget * N * t * 2 / (N * (N + 1) * T)
-    // Simplifies to: nextTarget = sumTarget * t * 2 / ((N + 1) * T)
-
-    // Use actualN for the calculation when we have less than N blocks
+    // where k = actualN * (actualN + 1) * T / 2
+    // Since we divided by actualN during accumulation, we need to multiply back:
+    // nextTarget = sumTarget * actualN * t / k
     int64_t actualK = actualN * (actualN + 1) * T / 2;
     arith_uint256 nextTarget = (sumTarget * actualN * t) / actualK;
 

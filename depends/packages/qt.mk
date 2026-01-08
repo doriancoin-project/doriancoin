@@ -12,7 +12,7 @@ $(package)_patches=fix_qt_pkgconfig.patch mac-qmake.conf fix_configure_mac.patch
 $(package)_patches+= fix_rcc_determinism.patch fix_riscv64_arch.patch xkb-default.patch no-xlib.patch
 $(package)_patches+= fix_android_qmake_conf.patch fix_android_jni_static.patch dont_hardcode_pwd.patch
 $(package)_patches+= freetype_back_compat.patch drop_lrelease_dependency.patch fix_powerpc_libpng.patch
-$(package)_patches+= fix_gcc13_limits.patch fix_mingw_touchiput.patch
+$(package)_patches+= fix_gcc13_limits.patch
 
 # Update OSX_QT_TRANSLATIONS when this is updated
 $(package)_qttranslations_file_name=qttranslations-$($(package)_suffix)
@@ -220,7 +220,8 @@ define $(package)_preprocess_cmds
   patch -p1 -i $($(package)_patch_dir)/fix_riscv64_arch.patch &&\
   patch -p1 -i $($(package)_patch_dir)/no-xlib.patch &&\
   patch -p1 -i $($(package)_patch_dir)/fix_gcc13_limits.patch &&\
-  patch -p1 -i $($(package)_patch_dir)/fix_mingw_touchiput.patch &&\
+  sed -i.old '/WM_GESTURE/,/WM_GESTURENOTIFY/d' qtbase/src/plugins/platforms/windows/qwindowsmousehandler.cpp &&\
+  sed -i.old '/typedef struct tagTOUCHINPUT/,/^} TOUCHINPUT/d' qtbase/src/plugins/platforms/windows/qwindowsmousehandler.cpp &&\
   echo "QMAKE_LINK_OBJECT_MAX = 10" >> qtbase/mkspecs/win32-g++/qmake.conf &&\
   echo "QMAKE_LINK_OBJECT_SCRIPT = object_script" >> qtbase/mkspecs/win32-g++/qmake.conf &&\
   sed -i.old "s|QMAKE_CFLAGS           += |!host_build: QMAKE_CFLAGS            = $($(package)_cflags) $($(package)_cppflags) |" qtbase/mkspecs/win32-g++/qmake.conf && \

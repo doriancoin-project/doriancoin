@@ -1,0 +1,18 @@
+--- a/qtbase/src/plugins/platforms/windows/qwindowsmousehandler.cpp
++++ b/qtbase/src/plugins/platforms/windows/qwindowsmousehandler.cpp
+@@ -62,6 +62,7 @@
+
+ QT_BEGIN_NAMESPACE
+
++#ifndef TOUCHEVENTF_MOVE
+ typedef struct tagTOUCHINPUT {
+     LONG x;
+     LONG y;
+@@ -74,6 +75,7 @@ typedef struct tagTOUCHINPUT {
+     DWORD cxContact;
+     DWORD cyContact;
+ } TOUCHINPUT, *PTOUCHINPUT;
++#endif
+
+ #define TOUCHEVENTF_MOVE 0x0001
+ #define TOUCHEVENTF_DOWN 0x0002

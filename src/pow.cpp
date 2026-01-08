@@ -152,12 +152,12 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     // Prevent division by zero - set minimum weighted timespan
     if (t <= 0) t = 1;
 
-    // LWMA formula: nextTarget = sumTarget * t / k
-    // where k = actualN * (actualN + 1) * T / 2
-    // Since we divided by actualN during accumulation, we need to multiply back:
-    // nextTarget = sumTarget * actualN * t / k
+    // LWMA formula: nextTarget = averageTarget * t / expectedT
+    // Where expectedT = T * (1 + 2 + ... + N) = T * N * (N+1) / 2
+    // Since sumTarget = sum(target_i / actualN) = averageTarget,
+    // we have: nextTarget = sumTarget * t / (T * actualN * (actualN+1) / 2)
     int64_t actualK = actualN * (actualN + 1) * T / 2;
-    arith_uint256 nextTarget = (sumTarget * actualN * t) / actualK;
+    arith_uint256 nextTarget = (sumTarget * t) / actualK;
 
     // Clamp to powLimit
     if (nextTarget > powLimit)

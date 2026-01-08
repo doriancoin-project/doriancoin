@@ -106,9 +106,8 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     int64_t height = pindexLast->nHeight + 1;
     int64_t blocks = std::min<int64_t>(N, height - params.nLWMAHeight);
 
-    // Transition guard: keep previous difficulty until we have a full window
-    // This prevents legacy/LWMA contamination during the transition period
-    if (blocks < N)
+    // Need at least 3 blocks for a meaningful LWMA calculation
+    if (blocks < 3)
         return pindexLast->nBits;
 
     // LWMA calculation with properly weighted targets AND solvetimes

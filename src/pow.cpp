@@ -106,13 +106,14 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     int64_t height = pindexLast->nHeight + 1;
     int64_t blocks = std::min<int64_t>(N, height - params.nLWMAHeight);
 
-    // Need at least 3 blocks for a meaningful LWMA calculation
-    if (blocks < 3)
+    // Transition guard: keep previous difficulty until we have a full window
+    // This prevents legacy/LWMA contamination during the transition period
+    if (blocks < N)
         return pindexLast->nBits;
 
     // LWMA calculation with properly weighted targets AND solvetimes
     arith_uint256 sumWeightedTarget = 0;
-    int64_t sumWeightedSolvetimes = 0;
+    arith_uint256 sumWeightedSolvetimes = 0;  // Use uint256 to prevent overflow
     int64_t sumWeights = 0;
 
     const CBlockIndex* block = pindexLast;
@@ -141,11 +142,16 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
         block = prev;
     }
 
-    // Safety: prevent extreme difficulty spikes from timestamp manipulation
-    // Minimum weighted solvetime is 10% of expected (limits difficulty increase to 10x)
-    int64_t minWeightedSolvetimes = sumWeights * T / 10;
+    // Safety: prevent extreme difficulty adjustments from timestamp manipulation
+    // Symmetric caps limit both increases and decreases to 10x per adjustment
+    arith_uint256 expectedWeightedSolvetimes = sumWeights * T;
+    arith_uint256 minWeightedSolvetimes = expectedWeightedSolvetimes / 10;  // Max 10x difficulty increase
+    arith_uint256 maxWeightedSolvetimes = expectedWeightedSolvetimes * 10;  // Max 10x difficulty decrease
+
     if (sumWeightedSolvetimes < minWeightedSolvetimes)
         sumWeightedSolvetimes = minWeightedSolvetimes;
+    if (sumWeightedSolvetimes > maxWeightedSolvetimes)
+        sumWeightedSolvetimes = maxWeightedSolvetimes;
 
     // LWMA formula for targets:
     // nextTarget = avgTarget * (avgSolvetime / expectedSolvetime)
@@ -156,7 +162,7 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     // - Decreases target (raises difficulty) when blocks are fast
     // - Increases target (lowers difficulty) when blocks are slow
     // - Maintains target when blocks are on-schedule
-    int64_t denominator = sumWeights * sumWeights * T;
+    arith_uint256 denominator = arith_uint256(sumWeights) * sumWeights * T;
     arith_uint256 nextTarget = (sumWeightedTarget * sumWeightedSolvetimes) / denominator;
 
     // Clamp to powLimit (minimum difficulty)

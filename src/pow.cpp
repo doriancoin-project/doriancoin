@@ -92,74 +92,74 @@ unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nF
 // Reference: https://github.com/zawy12/difficulty-algorithms/issues/3
 unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
+    assert(pindexLast);
+
     const int64_t T = params.nPowTargetSpacing;
     const int64_t N = params.nLWMAWindow;
-
     const arith_uint256 powLimit = UintToArith256(params.powLimit);
-    const unsigned int nProofOfWorkLimit = powLimit.GetCompact();
 
     // Handle regtest no-retarget mode
     if (params.fPowNoRetargeting)
         return pindexLast->nBits;
 
-    // Special testnet rule: allow min-difficulty blocks
-    if (params.fPowAllowMinDifficultyBlocks) {
-        if (pblock->GetBlockTime() > pindexLast->GetBlockTime() + T * 2)
-            return nProofOfWorkLimit;
-    }
-
-    // Calculate available blocks since LWMA activation
+    // Calculate how many blocks we can use since LWMA activation
     int64_t height = pindexLast->nHeight + 1;
-    int64_t blocksAvailable = height - params.nLWMAHeight;
+    int64_t blocks = std::min<int64_t>(N, height - params.nLWMAHeight);
 
-    // Use actual available blocks, minimum 1, maximum N
-    int64_t actualN = std::min(N, std::max(blocksAvailable, (int64_t)1));
-
-    // If insufficient history (need at least 2 blocks for a timespan), use previous difficulty
-    if (actualN < 2) {
+    // Need at least 3 blocks for a meaningful LWMA calculation
+    if (blocks < 3)
         return pindexLast->nBits;
-    }
 
-    // LWMA calculation
-    arith_uint256 sumTarget;
-    int64_t t = 0;
+    // LWMA calculation with properly weighted targets AND solvetimes
+    arith_uint256 sumWeightedTarget = 0;
+    int64_t sumWeightedSolvetimes = 0;
+    int64_t sumWeights = 0;
 
-    const CBlockIndex* pindex = pindexLast;
+    const CBlockIndex* block = pindexLast;
 
-    // In LWMA, weight should be highest for most recent blocks, lowest for oldest
-    // We iterate from newest to oldest, so weight starts at actualN and decreases
-    for (int64_t i = actualN; i > 0; i--) {
-        const CBlockIndex* pindexPrev = pindex->pprev;
-        if (!pindexPrev) break;
+    // Iterate from newest to oldest
+    // Weight 'i' goes from 'blocks' (newest, highest weight) down to 1 (oldest, lowest weight)
+    for (int64_t i = blocks; i >= 1; i--) {
+        const CBlockIndex* prev = block->pprev;
+        if (!prev) break;
 
-        int64_t solvetime = pindex->GetBlockTime() - pindexPrev->GetBlockTime();
+        int64_t solvetime = block->GetBlockTime() - prev->GetBlockTime();
 
-        // Limit solvetime to prevent timestamp manipulation
-        // Using 6*T bounds as recommended by Zawy
-        if (solvetime < -6 * T) solvetime = -6 * T;
+        // Clamp solvetime: minimum 1 second (no zero/negative), maximum 6*T
+        if (solvetime < 1) solvetime = 1;
         if (solvetime > 6 * T) solvetime = 6 * T;
 
-        // Weight 'i' gives highest weight (actualN) to newest block, lowest (1) to oldest
-        t += solvetime * i;
-
         arith_uint256 target;
-        target.SetCompact(pindex->nBits);
-        sumTarget += target / actualN;
+        target.SetCompact(block->nBits);
 
-        pindex = pindexPrev;
+        // Weight both target and solvetime by position
+        // Newest block gets weight 'blocks', oldest gets weight '1'
+        sumWeightedTarget += target * i;
+        sumWeightedSolvetimes += solvetime * i;
+        sumWeights += i;
+
+        block = prev;
     }
 
-    // Prevent division by zero - set minimum weighted timespan
-    if (t <= 0) t = 1;
+    // Safety: prevent extreme difficulty spikes from timestamp manipulation
+    // Minimum weighted solvetime is 10% of expected (limits difficulty increase to 10x)
+    int64_t minWeightedSolvetimes = sumWeights * T / 10;
+    if (sumWeightedSolvetimes < minWeightedSolvetimes)
+        sumWeightedSolvetimes = minWeightedSolvetimes;
 
-    // LWMA formula: nextTarget = averageTarget * t / expectedT
-    // Where expectedT = T * (1 + 2 + ... + N) = T * N * (N+1) / 2
-    // Since sumTarget = sum(target_i / actualN) = averageTarget,
-    // we have: nextTarget = sumTarget * t / (T * actualN * (actualN+1) / 2)
-    int64_t actualK = actualN * (actualN + 1) * T / 2;
-    arith_uint256 nextTarget = (sumTarget * t) / actualK;
+    // LWMA formula for targets:
+    // nextTarget = avgTarget * (avgSolvetime / expectedSolvetime)
+    //            = (sumWeightedTarget / sumWeights) * (sumWeightedSolvetimes / sumWeights) / T
+    //            = sumWeightedTarget * sumWeightedSolvetimes / (sumWeights^2 * T)
+    //
+    // This correctly:
+    // - Decreases target (raises difficulty) when blocks are fast
+    // - Increases target (lowers difficulty) when blocks are slow
+    // - Maintains target when blocks are on-schedule
+    int64_t denominator = sumWeights * sumWeights * T;
+    arith_uint256 nextTarget = (sumWeightedTarget * sumWeightedSolvetimes) / denominator;
 
-    // Clamp to powLimit
+    // Clamp to powLimit (minimum difficulty)
     if (nextTarget > powLimit)
         nextTarget = powLimit;
 

@@ -90,6 +90,75 @@ unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nF
 // LWMA - Linear Weighted Moving Average difficulty algorithm
 // Copyright (c) 2017-2019 Zawy
 // Reference: https://github.com/zawy12/difficulty-algorithms/issues/3
+
+// Original LWMA formula (used before nLWMAFixHeight)
+// This weighted both targets AND solvetimes, causing oscillation issues
+unsigned int GetNextWorkRequiredLWMALegacy(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
+{
+    assert(pindexLast);
+
+    const int64_t T = params.nPowTargetSpacing;
+    const int64_t N = params.nLWMAWindow;
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+
+    // Handle regtest no-retarget mode
+    if (params.fPowNoRetargeting)
+        return pindexLast->nBits;
+
+    // Calculate how many blocks we can use since LWMA activation
+    int64_t height = pindexLast->nHeight + 1;
+    int64_t blocks = std::min<int64_t>(N, height - params.nLWMAHeight);
+
+    // Need at least 3 blocks for a meaningful LWMA calculation
+    if (blocks < 3)
+        return pindexLast->nBits;
+
+    // LWMA calculation with weighted targets AND solvetimes (legacy formula)
+    arith_uint256 sumWeightedTarget = 0;
+    arith_uint256 sumWeightedSolvetimes = 0;
+    int64_t sumWeights = 0;
+
+    const CBlockIndex* block = pindexLast;
+
+    for (int64_t i = blocks; i >= 1; i--) {
+        const CBlockIndex* prev = block->pprev;
+        if (!prev) break;
+
+        int64_t solvetime = block->GetBlockTime() - prev->GetBlockTime();
+
+        if (solvetime < 1) solvetime = 1;
+        if (solvetime > 6 * T) solvetime = 6 * T;
+
+        arith_uint256 target;
+        target.SetCompact(block->nBits);
+
+        sumWeightedTarget += target * i;
+        sumWeightedSolvetimes += solvetime * i;
+        sumWeights += i;
+
+        block = prev;
+    }
+
+    arith_uint256 expectedWeightedSolvetimes = sumWeights * T;
+    arith_uint256 minWeightedSolvetimes = expectedWeightedSolvetimes / 10;
+    arith_uint256 maxWeightedSolvetimes = expectedWeightedSolvetimes * 10;
+
+    if (sumWeightedSolvetimes < minWeightedSolvetimes)
+        sumWeightedSolvetimes = minWeightedSolvetimes;
+    if (sumWeightedSolvetimes > maxWeightedSolvetimes)
+        sumWeightedSolvetimes = maxWeightedSolvetimes;
+
+    arith_uint256 denominator = arith_uint256(sumWeights) * sumWeights * T;
+    arith_uint256 nextTarget = (sumWeightedTarget * sumWeightedSolvetimes) / denominator;
+
+    if (nextTarget > powLimit)
+        nextTarget = powLimit;
+
+    return nextTarget.GetCompact();
+}
+
+// Fixed LWMA formula (used after nLWMAFixHeight)
+// Uses standard formula that only weights solvetimes, preventing oscillation
 unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
     assert(pindexLast);
@@ -178,7 +247,11 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHead
 
     // Use LWMA algorithm after activation height
     if (nHeight >= params.nLWMAHeight) {
-        return GetNextWorkRequiredLWMA(pindexLast, pblock, params);
+        // Use fixed LWMA formula after nLWMAFixHeight, legacy formula before
+        if (nHeight >= params.nLWMAFixHeight) {
+            return GetNextWorkRequiredLWMA(pindexLast, pblock, params);
+        }
+        return GetNextWorkRequiredLWMALegacy(pindexLast, pblock, params);
     }
 
     // Use original BTC-style algorithm before activation

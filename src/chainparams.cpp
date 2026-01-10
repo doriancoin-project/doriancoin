@@ -74,7 +74,8 @@ public:
         consensus.BIP66Height = 302983; // 7aceee012833fa8952f8835d8b1b3ae233cd6ab08fdb27a771d2bd7bdc491894
         consensus.CSVHeight = 1244000; // CSV activation (BIP68/112/113)
         consensus.SegwitHeight = 1244000; // SegWit activation (BIP141/143/147)
-        consensus.nLWMAHeight = 1243845; // TODO: Set to desired mainnet activation height
+        consensus.nLWMAHeight = 1243845; // LWMA activation height
+        consensus.nLWMAFixHeight = 1250000; // LWMA formula fix activation (standard formula)
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -187,7 +188,8 @@ public:
         consensus.BIP66Height = 0; // 8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573
         consensus.CSVHeight = 0; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
         consensus.SegwitHeight = 0; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
-        consensus.nLWMAHeight = 100; // TODO: Set to testnet activation height (~2 weeks before mainnet)
+        consensus.nLWMAHeight = 100; // Testnet LWMA activation height
+        consensus.nLWMAFixHeight = 200; // Testnet LWMA formula fix activation
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -285,6 +287,7 @@ public:
         consensus.CSVHeight = 432; // CSV activated on regtest (Used in rpc activation tests)
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
         consensus.nLWMAHeight = 500; // Low value for regtest testing
+        consensus.nLWMAFixHeight = 600; // Regtest LWMA formula fix activation
         consensus.nLWMAWindow = 45; // 45-block averaging window
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");

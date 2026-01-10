@@ -281,6 +281,9 @@ RES_ANIMATION = $(wildcard $(srcdir)/qt/res/animation/spinner-*.png)
 
 BITCOIN_RC = qt/res/bitcoin-qt-res.rc
 
+# Windows resource file depends on icons - ensure rebuild when icons change
+qt/res/bitcoin-qt-res.o: qt/res/bitcoin-qt-res.rc $(srcdir)/qt/res/icons/bitcoin.ico $(srcdir)/qt/res/icons/bitcoin_testnet.ico
+
 BITCOIN_QT_INCLUDES = -DQT_NO_KEYWORDS
 
 qt_libbitcoinqt_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(BITCOIN_QT_INCLUDES) \

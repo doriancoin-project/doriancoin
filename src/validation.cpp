@@ -1217,6 +1217,9 @@ bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus
     return true;
 }
 
+// Legacy Litecoin magic bytes for reading old block files
+static const CMessageHeader::MessageStartChars LEGACY_LITECOIN_MAGIC = {0xfb, 0xc0, 0xb6, 0xdb};
+
 bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const FlatFilePos& pos, const CMessageHeader::MessageStartChars& message_start)
 {
     FlatFilePos hpos = pos;
@@ -1232,7 +1235,11 @@ bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const FlatFilePos& pos, c
 
         filein >> blk_start >> blk_size;
 
-        if (memcmp(blk_start, message_start, CMessageHeader::MESSAGE_START_SIZE)) {
+        // Accept both current magic and legacy Litecoin magic for backwards compatibility
+        // with block files created before the network magic byte change
+        bool magic_ok = (memcmp(blk_start, message_start, CMessageHeader::MESSAGE_START_SIZE) == 0) ||
+                        (memcmp(blk_start, LEGACY_LITECOIN_MAGIC, CMessageHeader::MESSAGE_START_SIZE) == 0);
+        if (!magic_ok) {
             return error("%s: Block magic mismatch for %s: %s versus expected %s", __func__, pos.ToString(),
                     HexStr(blk_start),
                     HexStr(message_start));

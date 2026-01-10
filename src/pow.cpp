@@ -110,9 +110,12 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     if (blocks < 3)
         return pindexLast->nBits;
 
-    // LWMA calculation with properly weighted targets AND solvetimes
-    arith_uint256 sumWeightedTarget = 0;
-    arith_uint256 sumWeightedSolvetimes = 0;  // Use uint256 to prevent overflow
+    // Get the previous block's target as our starting point
+    arith_uint256 prevTarget;
+    prevTarget.SetCompact(pindexLast->nBits);
+
+    // LWMA calculation - weight solvetimes by position (newer = higher weight)
+    int64_t sumWeightedSolvetimes = 0;
     int64_t sumWeights = 0;
 
     const CBlockIndex* block = pindexLast;
@@ -129,40 +132,35 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
         if (solvetime < 1) solvetime = 1;
         if (solvetime > 6 * T) solvetime = 6 * T;
 
-        arith_uint256 target;
-        target.SetCompact(block->nBits);
-
-        // Weight both target and solvetime by position
-        // Newest block gets weight 'blocks', oldest gets weight '1'
-        sumWeightedTarget += target * i;
+        // Weight solvetime by position - newest block gets highest weight
         sumWeightedSolvetimes += solvetime * i;
         sumWeights += i;
 
         block = prev;
     }
 
-    // Safety: prevent extreme difficulty adjustments from timestamp manipulation
-    // Symmetric caps limit both increases and decreases to 10x per adjustment
-    arith_uint256 expectedWeightedSolvetimes = sumWeights * T;
-    arith_uint256 minWeightedSolvetimes = expectedWeightedSolvetimes / 10;  // Max 10x difficulty increase
-    arith_uint256 maxWeightedSolvetimes = expectedWeightedSolvetimes * 10;  // Max 10x difficulty decrease
+    // Calculate expected weighted solvetime if all blocks were on-target
+    int64_t expectedWeightedSolvetimes = sumWeights * T;
+
+    // Safety: symmetric caps limit adjustment to 10x per block in either direction
+    // This prevents both difficulty collapse (runaway easy) and spikes (runaway hard)
+    int64_t minWeightedSolvetimes = expectedWeightedSolvetimes / 10;  // Max 10x difficulty increase
+    int64_t maxWeightedSolvetimes = expectedWeightedSolvetimes * 10;  // Max 10x difficulty decrease
 
     if (sumWeightedSolvetimes < minWeightedSolvetimes)
         sumWeightedSolvetimes = minWeightedSolvetimes;
     if (sumWeightedSolvetimes > maxWeightedSolvetimes)
         sumWeightedSolvetimes = maxWeightedSolvetimes;
 
-    // LWMA formula for targets:
-    // nextTarget = avgTarget * (avgSolvetime / expectedSolvetime)
-    //            = (sumWeightedTarget / sumWeights) * (sumWeightedSolvetimes / sumWeights) / T
-    //            = sumWeightedTarget * sumWeightedSolvetimes / (sumWeights^2 * T)
+    // Standard LWMA formula:
+    // nextTarget = prevTarget * (weightedAvgSolvetime / T)
+    //            = prevTarget * sumWeightedSolvetimes / (sumWeights * T)
     //
     // This correctly:
-    // - Decreases target (raises difficulty) when blocks are fast
-    // - Increases target (lowers difficulty) when blocks are slow
-    // - Maintains target when blocks are on-schedule
-    arith_uint256 denominator = arith_uint256(sumWeights) * sumWeights * T;
-    arith_uint256 nextTarget = (sumWeightedTarget * sumWeightedSolvetimes) / denominator;
+    // - Decreases target (raises difficulty) when blocks are fast (ratio < 1)
+    // - Increases target (lowers difficulty) when blocks are slow (ratio > 1)
+    // - Maintains target when blocks are on-schedule (ratio = 1)
+    arith_uint256 nextTarget = prevTarget * sumWeightedSolvetimes / expectedWeightedSolvetimes;
 
     // Clamp to powLimit (minimum difficulty)
     if (nextTarget > powLimit)

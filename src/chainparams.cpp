@@ -98,8 +98,9 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nStartHeight = 2217600; // End Feb 2022
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = 2427264; // 364 days later
 
-        consensus.nMinimumChainWork = uint256S("0x00000000000000000000000000000000000000000000000000000a58d9e0e1e2");
-        consensus.defaultAssumeValid = uint256S("0x72450bab39be64a5d4f6eb14af4df14593a3b5e0f8a81ecaa27b24c43e9759b7"); 
+        // Temporarily disabled after chain rollback - update once chain is stable
+        consensus.nMinimumChainWork = uint256{};
+        consensus.defaultAssumeValid = uint256{}; 
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.

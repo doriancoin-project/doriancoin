@@ -75,7 +75,7 @@ public:
         consensus.CSVHeight = 1244000; // CSV activation (BIP68/112/113)
         consensus.SegwitHeight = 1244000; // SegWit activation (BIP141/143/147)
         consensus.nLWMAHeight = 1243845; // LWMA activation height
-        consensus.nLWMAFixHeight = 1250000; // LWMA formula fix activation (standard formula)
+        consensus.nLWMAFixHeight = 1244000; // LWMA formula fix activation (standard formula)
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");

@@ -71,6 +71,8 @@ struct Params {
      * Note that segwit v0 script rules are enforced on all blocks except the
      * BIP 16 exception blocks. */
     int SegwitHeight;
+    /** Block height at which MWEB (LIPs 0002-0004) becomes active. */
+    int MWEBHeight;
     /** Block height at which LWMA difficulty algorithm activates */
     int nLWMAHeight;
     /** LWMA averaging window (number of blocks) */

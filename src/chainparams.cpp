@@ -74,6 +74,7 @@ public:
         consensus.BIP66Height = 302983; // 7aceee012833fa8952f8835d8b1b3ae233cd6ab08fdb27a771d2bd7bdc491894
         consensus.CSVHeight = 1244000; // CSV activation (BIP68/112/113)
         consensus.SegwitHeight = 1244000; // SegWit activation (BIP141/143/147)
+        consensus.MWEBHeight = 1244100; // MWEB activation (LIPs 0002-0004)
         consensus.nLWMAHeight = 1243845; // LWMA activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
@@ -188,6 +189,7 @@ public:
         consensus.BIP66Height = 0; // 8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573
         consensus.CSVHeight = 0; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
         consensus.SegwitHeight = 0; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
+        consensus.MWEBHeight = 0; // MWEB always active on testnet
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
@@ -285,6 +287,7 @@ public:
         consensus.BIP66Height = 1251; // BIP66 activated on regtest (Used in functional tests)
         consensus.CSVHeight = 432; // CSV activated on regtest (Used in rpc activation tests)
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
+        consensus.MWEBHeight = 0; // MWEB always active on regtest
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAWindow = 45; // 45-block averaging window
         consensus.MinBIP9WarningHeight = 0;

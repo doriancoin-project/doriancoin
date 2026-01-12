@@ -72,8 +72,8 @@ public:
         consensus.BIP34Hash = uint256S("d21da25e277bd20b7456087d69c5fee2ebc6091b410271b5cb0623c7d1e7d1b9");
         consensus.BIP65Height = 302983; // bab3041e8977e0dc3eeff63fe707b92bde1dd449d8efafb248c27c8264cc311a
         consensus.BIP66Height = 302983; // 7aceee012833fa8952f8835d8b1b3ae233cd6ab08fdb27a771d2bd7bdc491894
-        consensus.CSVHeight = 1244000; // CSV activation (BIP68/112/113)
-        consensus.SegwitHeight = 1244000; // SegWit activation (BIP141/143/147)
+        consensus.CSVHeight = 0; // Always active - historical chain has SegWit transactions
+        consensus.SegwitHeight = 0; // Always active - historical chain has SegWit transactions
         consensus.nLWMAHeight = 1243845; // LWMA activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 

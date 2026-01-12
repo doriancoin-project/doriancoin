@@ -4837,13 +4837,26 @@ void LoadExternalBlockFile(const CChainParams& chainparams, FILE* fileIn, FlatFi
             blkdat.SetLimit(); // remove former limit
             unsigned int nSize = 0;
             try {
-                // locate a header
+                // locate a header - check for both current and legacy magic bytes
                 unsigned char buf[CMessageHeader::MESSAGE_START_SIZE];
-                blkdat.FindByte(chainparams.MessageStart()[0]);
-                nRewind = blkdat.GetPos()+1;
-                blkdat >> buf;
-                if (memcmp(buf, chainparams.MessageStart(), CMessageHeader::MESSAGE_START_SIZE))
-                    continue;
+                // Try to find either new magic (0xd0) or legacy Litecoin magic (0xfb)
+                bool found = false;
+                while (!blkdat.eof()) {
+                    unsigned char byte;
+                    blkdat >> byte;
+                    if (byte == chainparams.MessageStart()[0] || byte == LEGACY_LITECOIN_MAGIC[0]) {
+                        buf[0] = byte;
+                        blkdat >> buf[1] >> buf[2] >> buf[3];
+                        if (memcmp(buf, chainparams.MessageStart(), CMessageHeader::MESSAGE_START_SIZE) == 0 ||
+                            memcmp(buf, LEGACY_LITECOIN_MAGIC, CMessageHeader::MESSAGE_START_SIZE) == 0) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found)
+                    break;
+                nRewind = blkdat.GetPos();
                 // read size
                 blkdat >> nSize;
                 if (nSize < 80 || nSize > MAX_BLOCK_SERIALIZED_SIZE_WITH_MWEB)

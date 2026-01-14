@@ -714,8 +714,9 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
 
     // Check for non-standard pay-to-script-hash in inputs
     const auto& params = args.m_chainparams.GetConsensus();
-    auto taproot_state = VersionBitsState(::ChainActive().Tip(), params, Consensus::DEPLOYMENT_TAPROOT, versionbitscache);
-    if (fRequireStandard && !AreInputsStandard(tx, m_view, taproot_state == ThresholdState::ACTIVE)) {
+    const CBlockIndex* tip = ::ChainActive().Tip();
+    bool taproot_active = (tip != nullptr) && (tip->nHeight + 1 >= params.TaprootHeight);
+    if (fRequireStandard && !AreInputsStandard(tx, m_view, taproot_active)) {
         return state.Invalid(TxValidationResult::TX_INPUTS_NOT_STANDARD, "bad-txns-nonstandard-inputs");
     }
 
@@ -1974,8 +1975,8 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
         flags |= SCRIPT_VERIFY_CHECKSEQUENCEVERIFY;
     }
 
-    // Start enforcing Taproot using versionbits logic.
-    if (VersionBitsState(pindex->pprev, consensusparams, Consensus::DEPLOYMENT_TAPROOT, versionbitscache) == ThresholdState::ACTIVE) {
+    // Start enforcing Taproot (BIPs 340-342)
+    if (pindex->nHeight >= consensusparams.TaprootHeight) {
         flags |= SCRIPT_VERIFY_TAPROOT;
     }
 

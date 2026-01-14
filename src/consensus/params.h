@@ -73,6 +73,8 @@ struct Params {
     int SegwitHeight;
     /** Block height at which MWEB (LIPs 0002-0004) becomes active. */
     int MWEBHeight;
+    /** Block height at which Taproot (BIPs 340-342) becomes active. */
+    int TaprootHeight;
     /** Block height at which LWMA difficulty algorithm activates */
     int nLWMAHeight;
     /** LWMA averaging window (number of blocks) */

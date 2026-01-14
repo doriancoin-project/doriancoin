@@ -75,6 +75,7 @@ public:
         consensus.CSVHeight = 1244000; // CSV activation (BIP68/112/113)
         consensus.SegwitHeight = 1244000; // SegWit activation (BIP141/143/147)
         consensus.MWEBHeight = 1244100; // MWEB activation (LIPs 0002-0004)
+        consensus.TaprootHeight = 1244220; // Taproot activation (BIPs 340-342)
         consensus.nLWMAHeight = 1243845; // LWMA activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
@@ -89,10 +90,10 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // Deployment of Taproot (BIPs 340-342)
+        // Deployment of Taproot (BIPs 340-342) - now a buried deployment at TaprootHeight
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].bit = 2;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartHeight = 2161152; // End November 2021
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeoutHeight = 2370816; // 364 days later
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // Deployment of MWEB (LIP-0002, LIP-0003, and LIP-0004)
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].bit = 4;
@@ -190,6 +191,7 @@ public:
         consensus.CSVHeight = 0; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
         consensus.SegwitHeight = 0; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
         consensus.MWEBHeight = 0; // MWEB always active on testnet
+        consensus.TaprootHeight = 0; // Taproot always active on testnet
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
@@ -204,10 +206,10 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // Deployment of Taproot (BIPs 340-342)
+        // Deployment of Taproot (BIPs 340-342) - now a buried deployment at TaprootHeight
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].bit = 2;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartHeight = 2225664; // March 2022
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeoutHeight = 2435328; // 364 days later
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // Deployment of MWEB (LIP-0002, LIP-0003, and LIP-0004)
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].bit = 4;
@@ -288,6 +290,7 @@ public:
         consensus.CSVHeight = 432; // CSV activated on regtest (Used in rpc activation tests)
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
         consensus.MWEBHeight = 0; // MWEB always active on regtest
+        consensus.TaprootHeight = 0; // Taproot always active on regtest
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAWindow = 45; // 45-block averaging window
         consensus.MinBIP9WarningHeight = 0;
@@ -303,8 +306,9 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 0;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
+        // Deployment of Taproot (BIPs 340-342) - now a buried deployment at TaprootHeight
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].bit = 2;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // Deployment of MWEB (LIP-0002 and LIP-0003)

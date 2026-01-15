@@ -77,6 +77,7 @@ public:
         consensus.MWEBHeight = 1244100; // MWEB activation (LIPs 0002-0004)
         consensus.TaprootHeight = 1244220; // Taproot activation (BIPs 340-342)
         consensus.nLWMAHeight = 1243845; // LWMA activation height
+        consensus.nLWMAFixHeight = 1244300; // LWMAv2 stabilized algorithm activation
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -193,6 +194,7 @@ public:
         consensus.MWEBHeight = 0; // MWEB always active on testnet
         consensus.TaprootHeight = 0; // Taproot always active on testnet
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
+        consensus.nLWMAFixHeight = 200; // Testnet LWMAv2 activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -292,6 +294,7 @@ public:
         consensus.MWEBHeight = 0; // MWEB always active on regtest
         consensus.TaprootHeight = 0; // Taproot always active on regtest
         consensus.nLWMAHeight = 500; // Low value for regtest testing
+        consensus.nLWMAFixHeight = 600; // Regtest LWMAv2 activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");

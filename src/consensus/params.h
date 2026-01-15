@@ -77,6 +77,8 @@ struct Params {
     int TaprootHeight;
     /** Block height at which LWMA difficulty algorithm activates */
     int nLWMAHeight;
+    /** Block height at which LWMAv2 (stabilized) difficulty algorithm activates */
+    int nLWMAFixHeight;
     /** LWMA averaging window (number of blocks) */
     int64_t nLWMAWindow;
     /** Don't warn about unknown BIP 9 activations below this height.

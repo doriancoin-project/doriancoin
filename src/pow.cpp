@@ -172,6 +172,85 @@ unsigned int GetNextWorkRequiredLWMA(const CBlockIndex* pindexLast, const CBlock
     return nextTarget.GetCompact();
 }
 
+// LWMAv2 - Stabilized LWMA difficulty algorithm
+// Fixes feedback loop instability by using window-start target as reference
+// instead of previous block target, preventing compounding oscillations.
+unsigned int GetNextWorkRequiredLWMAv2(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
+{
+    assert(pindexLast);
+
+    const int64_t T = params.nPowTargetSpacing;
+    const int64_t N = params.nLWMAWindow;
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+
+    // Handle regtest no-retarget mode
+    if (params.fPowNoRetargeting)
+        return pindexLast->nBits;
+
+    // Calculate how many blocks we can use since LWMA activation
+    int64_t height = pindexLast->nHeight + 1;
+    int64_t blocks = std::min<int64_t>(N, height - params.nLWMAHeight);
+
+    // Need at least 3 blocks for a meaningful LWMA calculation
+    if (blocks < 3)
+        return pindexLast->nBits;
+
+    // KEY FIX: Use target from START of window as reference (not previous block)
+    // This breaks the feedback loop that caused oscillations in v1
+    const CBlockIndex* windowStart = pindexLast;
+    for (int64_t i = 0; i < blocks && windowStart->pprev; i++) {
+        windowStart = windowStart->pprev;
+    }
+    arith_uint256 referenceTarget;
+    referenceTarget.SetCompact(windowStart->nBits);
+
+    // LWMA calculation - weight solvetimes by position (newer = higher weight)
+    int64_t sumWeightedSolvetimes = 0;
+    int64_t sumWeights = 0;
+
+    const CBlockIndex* block = pindexLast;
+
+    // Iterate from newest to oldest
+    for (int64_t i = blocks; i >= 1; i--) {
+        const CBlockIndex* prev = block->pprev;
+        if (!prev) break;
+
+        int64_t solvetime = block->GetBlockTime() - prev->GetBlockTime();
+
+        // Clamp solvetime: minimum 1 second (no zero/negative), maximum 6*T
+        if (solvetime < 1) solvetime = 1;
+        if (solvetime > 6 * T) solvetime = 6 * T;
+
+        // Weight solvetime by position - newest block gets highest weight
+        sumWeightedSolvetimes += solvetime * i;
+        sumWeights += i;
+
+        block = prev;
+    }
+
+    // Calculate expected weighted solvetime if all blocks were on-target
+    int64_t expectedWeightedSolvetimes = sumWeights * T;
+
+    // KEY FIX: Tighter caps (3x instead of 10x) as safety valve
+    // With window-start reference, extreme caps should rarely be hit
+    int64_t minWeightedSolvetimes = expectedWeightedSolvetimes / 3;  // Max 3x difficulty increase
+    int64_t maxWeightedSolvetimes = expectedWeightedSolvetimes * 3;  // Max 3x difficulty decrease
+
+    if (sumWeightedSolvetimes < minWeightedSolvetimes)
+        sumWeightedSolvetimes = minWeightedSolvetimes;
+    if (sumWeightedSolvetimes > maxWeightedSolvetimes)
+        sumWeightedSolvetimes = maxWeightedSolvetimes;
+
+    // Apply adjustment to reference target (from window start, not previous block)
+    arith_uint256 nextTarget = referenceTarget * sumWeightedSolvetimes / expectedWeightedSolvetimes;
+
+    // Clamp to powLimit (minimum difficulty)
+    if (nextTarget > powLimit)
+        nextTarget = powLimit;
+
+    return nextTarget.GetCompact();
+}
+
 // Main dispatch function - routes to appropriate algorithm based on block height
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
@@ -179,12 +258,17 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHead
 
     int nHeight = pindexLast->nHeight + 1;
 
-    // Use LWMA algorithm after activation height
+    // Use stabilized LWMAv2 algorithm after fix height
+    if (nHeight >= params.nLWMAFixHeight) {
+        return GetNextWorkRequiredLWMAv2(pindexLast, pblock, params);
+    }
+
+    // Use original LWMA algorithm after activation height (but before fix)
     if (nHeight >= params.nLWMAHeight) {
         return GetNextWorkRequiredLWMA(pindexLast, pblock, params);
     }
 
-    // Use original BTC-style algorithm before activation
+    // Use original BTC-style algorithm before LWMA activation
     return GetNextWorkRequiredBTC(pindexLast, pblock, params);
 }
 

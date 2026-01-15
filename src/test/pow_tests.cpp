@@ -360,4 +360,142 @@ BOOST_AUTO_TEST_CASE(lwma_solvetime_bounds)
     BOOST_CHECK(target <= UintToArith256(params.powLimit));
 }
 
+/* Test that dispatch uses LWMAv2 after fix activation height */
+BOOST_AUTO_TEST_CASE(lwmav2_dispatch_after_fix_height)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation heights for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nLWMAWindow = 45;
+
+    // Create chain of blocks after LWMAv2 fix activation
+    const int numBlocks = 60;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nLWMAFixHeight + i;
+        blocks[i].nTime = 1394325760 + i * params.nPowTargetSpacing;
+        blocks[i].nBits = 0x1e0ffff0;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + params.nPowTargetSpacing;
+
+    // After fix height, GetNextWorkRequired should use LWMAv2 algorithm
+    unsigned int result = GetNextWorkRequired(&blocks[numBlocks - 1], &header, params);
+    unsigned int lwmav2Result = GetNextWorkRequiredLWMAv2(&blocks[numBlocks - 1], &header, params);
+    BOOST_CHECK_EQUAL(result, lwmav2Result);
+}
+
+/* Test that LWMAv2 uses window-start target as reference (not previous block) */
+BOOST_AUTO_TEST_CASE(lwmav2_uses_window_start_target)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation heights for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nLWMAWindow = 10;
+
+    // Create a chain where the last few blocks have different difficulty
+    // than the window start - this tests that v2 uses window-start reference
+    const int numBlocks = 15;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nLWMAFixHeight + i;
+        blocks[i].nTime = 1394325760 + i * params.nPowTargetSpacing; // On-target timing
+
+        // First 5 blocks have base difficulty, last blocks have 10x harder difficulty
+        // In v1 (using prevTarget), result would be based on hard difficulty
+        // In v2 (using window-start), result should be based on window-start difficulty
+        if (i < 5) {
+            blocks[i].nBits = 0x1e0ffff0; // Base difficulty
+        } else {
+            blocks[i].nBits = 0x1d0ffff0; // 16x harder difficulty
+        }
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + params.nPowTargetSpacing;
+
+    // With on-target solvetimes, v2 should produce result based on window-start difficulty
+    // not the recent blocks' harder difficulty
+    unsigned int result = GetNextWorkRequiredLWMAv2(&blocks[numBlocks - 1], &header, params);
+
+    // Result should be valid
+    BOOST_CHECK(result != 0);
+    arith_uint256 target;
+    bool neg, over;
+    target.SetCompact(result, &neg, &over);
+    BOOST_CHECK(!neg && !over);
+
+    // Since timing is on-target, result should be close to window-start difficulty (0x1e0ffff0)
+    // not recent blocks' difficulty (0x1d0ffff0)
+    arith_uint256 windowStartTarget;
+    windowStartTarget.SetCompact(0x1e0ffff0);
+
+    arith_uint256 recentTarget;
+    recentTarget.SetCompact(0x1d0ffff0);
+
+    // Target should be much closer to windowStartTarget than recentTarget
+    // (allowing some deviation due to timing variations)
+    arith_uint256 diffFromWindowStart = target > windowStartTarget ?
+        target - windowStartTarget : windowStartTarget - target;
+    arith_uint256 diffFromRecent = target > recentTarget ?
+        target - recentTarget : recentTarget - target;
+
+    BOOST_CHECK(diffFromWindowStart < diffFromRecent);
+}
+
+/* Test LWMAv2 3x cap enforcement */
+BOOST_AUTO_TEST_CASE(lwmav2_cap_enforcement)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation heights for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nLWMAWindow = 10;
+
+    // Create blocks with extremely fast solvetimes to trigger cap
+    const int numBlocks = 15;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nLWMAFixHeight + i;
+        // Very fast blocks (1 second each instead of 150 seconds)
+        blocks[i].nTime = 1394325760 + i * 1;
+        blocks[i].nBits = 0x1e0ffff0;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + 1;
+
+    // Get LWMAv2 result with extreme fast blocks
+    unsigned int result = GetNextWorkRequiredLWMAv2(&blocks[numBlocks - 1], &header, params);
+
+    // Result should be valid
+    BOOST_CHECK(result != 0);
+    arith_uint256 target;
+    bool neg, over;
+    target.SetCompact(result, &neg, &over);
+    BOOST_CHECK(!neg && !over);
+
+    // With 3x cap, target should be at most 3x lower than window-start target
+    arith_uint256 windowStartTarget;
+    windowStartTarget.SetCompact(0x1e0ffff0);
+    arith_uint256 minAllowedTarget = windowStartTarget / 3;
+
+    BOOST_CHECK(target >= minAllowedTarget);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

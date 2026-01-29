@@ -192,7 +192,7 @@ class DeploymentInfo(object):
                     return True
         return False
 
-def getFrameworks(binaryPath: str, verbose: int) -> List[FrameworkInfo]:
+def getFrameworks(binaryPath: str, verbose: int, sourceDir: str = None) -> List[FrameworkInfo]:
     if verbose >= 3:
         print("Inspecting with otool: " + binaryPath)
     otoolbin=os.getenv("OTOOL", "otool")
@@ -208,17 +208,28 @@ def getFrameworks(binaryPath: str, verbose: int) -> List[FrameworkInfo]:
     otoolLines.pop(0) # First line is the inspected binary
     if ".framework" in binaryPath or binaryPath.endswith(".dylib"):
         otoolLines.pop(0) # Frameworks and dylibs list themselves as a dependency.
-    
+
     libraries = []
     for line in otoolLines:
-        line = line.replace("@loader_path", os.path.dirname(binaryPath))
+        # Resolve @loader_path: try the original source directory first (for
+        # transitive dependencies that haven't been copied yet), then fall back
+        # to the deployed binary's directory.
+        if "@loader_path" in line and sourceDir is not None:
+            resolved = line.replace("@loader_path", sourceDir)
+            resolvedPath = resolved.strip().split(" (")[0] if " (" in resolved else resolved.strip()
+            if os.path.exists(resolvedPath):
+                line = resolved
+            else:
+                line = line.replace("@loader_path", os.path.dirname(binaryPath))
+        else:
+            line = line.replace("@loader_path", os.path.dirname(binaryPath))
         info = FrameworkInfo.fromOtoolLibraryLine(line.strip())
         if info is not None:
             if verbose >= 3:
                 print("Found framework:")
                 print(info)
             libraries.append(info)
-    
+
     return libraries
 
 def runInstallNameTool(action: str, *args):
@@ -276,19 +287,39 @@ def copyFramework(framework: FrameworkInfo, path: str, verbose: int) -> Optional
 
     if not framework.isDylib(): # Copy resources for real frameworks
 
-        linkfrom = os.path.join(path, "Contents","Frameworks", framework.frameworkName, "Versions", "Current")
+        fwDir = os.path.join(path, "Contents", "Frameworks", framework.frameworkName)
+        linkfrom = os.path.join(fwDir, "Versions", "Current")
         linkto = framework.version
         if not os.path.exists(linkfrom):
             os.symlink(linkto, linkfrom)
             if verbose >= 2:
                 print("Linked:", linkfrom, "->", linkto)
+
+        # Create top-level symlinks required by macOS framework bundle format.
+        # Without these, codesign will reject the bundle as invalid.
+        binaryLink = os.path.join(fwDir, framework.binaryName)
+        if not os.path.exists(binaryLink):
+            os.symlink(os.path.join("Versions", "Current", framework.binaryName), binaryLink)
+            if verbose >= 2:
+                print("Linked:", binaryLink, "->", os.path.join("Versions", "Current", framework.binaryName))
+
         fromResourcesDir = framework.sourceResourcesDirectory
         if os.path.exists(fromResourcesDir):
-            toResourcesDir = os.path.join(path, framework.destinationResourcesDirectory)
-            shutil.copytree(fromResourcesDir, toResourcesDir, symlinks=True)
-            if verbose >= 3:
-                print("Copied resources:", fromResourcesDir)
-                print(" to:", toResourcesDir)
+            # Copy resources into the versioned directory, then create a
+            # top-level symlink.  This matches the standard macOS framework
+            # bundle layout that codesign expects.
+            versionedResourcesDir = os.path.join(fwDir, "Versions", framework.version, "Resources")
+            if not os.path.exists(versionedResourcesDir):
+                shutil.copytree(fromResourcesDir, versionedResourcesDir, symlinks=True)
+                if verbose >= 3:
+                    print("Copied resources:", fromResourcesDir)
+                    print(" to:", versionedResourcesDir)
+            resourcesLink = os.path.join(fwDir, "Resources")
+            if not os.path.lexists(resourcesLink):
+                os.symlink(os.path.join("Versions", "Current", "Resources"), resourcesLink)
+                if verbose >= 2:
+                    print("Linked:", resourcesLink, "->", os.path.join("Versions", "Current", "Resources"))
+
         fromContentsDir = framework.sourceVersionContentsDirectory
         if not os.path.exists(fromContentsDir):
             fromContentsDir = framework.sourceContentsDirectory
@@ -343,9 +374,13 @@ def deployFrameworks(frameworks: List[FrameworkInfo], bundlePath: str, binaryPat
         
         # install_name_tool it a new id.
         changeIdentification(framework.deployedInstallName, deployedBinaryPath, verbose)
-        # Check for framework dependencies
-        dependencies = getFrameworks(deployedBinaryPath, verbose)
-        
+        # Check for framework dependencies, passing the original source
+        # directory so @loader_path references resolve to the source location
+        # (where transitive dependencies actually exist) rather than the
+        # bundle directory (where they haven't been copied yet).
+        sourceDir = os.path.dirname(framework.sourceFilePath)
+        dependencies = getFrameworks(deployedBinaryPath, verbose, sourceDir=sourceDir)
+
         for dependency in dependencies:
             changeInstallName(dependency.installName, dependency.deployedInstallName, deployedBinaryPath, verbose)
             

@@ -19,7 +19,7 @@ Then install [Homebrew](https://brew.sh).
 
 ## Dependencies
 ```shell
-brew install automake libtool boost miniupnpc pkg-config python qt libevent qrencode fmt
+brew install automake libtool boost miniupnpc pkg-config python qt@5 libevent qrencode fmt
 ```
 
 If you run into issues, check [Homebrew's troubleshooting page](https://docs.brew.sh/Troubleshooting).
@@ -31,7 +31,7 @@ brew install librsvg
 ```
 
 The wallet support requires one or both of the dependencies ([*SQLite*](#sqlite) and [*Berkeley DB*](#berkeley-db)) in the sections below.
-To build Bitcoin Core without wallet, see [*Disable-wallet mode*](#disable-wallet-mode).
+To build Doriancoin Core without wallet, see [*Disable-wallet mode*](#disable-wallet-mode).
 
 #### SQLite
 
@@ -75,10 +75,26 @@ brew install berkeley-db4
     Configure and build the headless Doriancoin Core binaries as well as the GUI (if Qt is found).
 
     You can disable the GUI build by passing `--without-gui` to configure.
+
+    On Apple Silicon (M1/M2/M3) Macs, Homebrew installs to `/opt/homebrew` which
+    is not in the default compiler search path. You must pass the paths explicitly.
+    The `qt@5` package is also keg-only and requires its own pkg-config path:
+
     ```shell
     ./autogen.sh
-    ./configure
-    make
+    ./configure \
+        --with-boost-libdir=/opt/homebrew/lib \
+        LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/fmt/lib -L/opt/homebrew/opt/qt@5/lib" \
+        CPPFLAGS="-I/opt/homebrew/include -I/opt/homebrew/opt/fmt/include -I/opt/homebrew/opt/qt@5/include" \
+        PKG_CONFIG_PATH="/opt/homebrew/opt/qt@5/lib/pkgconfig"
+    make -j$(sysctl -n hw.ncpu)
+    ```
+
+    On Intel Macs where Homebrew installs to `/usr/local`, the simpler form may work:
+    ```shell
+    ./autogen.sh
+    ./configure PKG_CONFIG_PATH="/usr/local/opt/qt@5/lib/pkgconfig"
+    make -j$(sysctl -n hw.ncpu)
     ```
 
 3.  It is recommended to build and run the unit tests:
@@ -130,6 +146,6 @@ tail -f $HOME/Library/Application\ Support/Doriancoin/debug.log
 ```
 
 ## Notes
-* Tested on OS X 10.14 Mojave through macOS 11 Big Sur on 64-bit Intel
-processors only.
+* Tested on macOS with Apple Silicon (ARM64) and Intel (x86_64) processors.
+* Qt 5 is required for the GUI. Install `qt@5` from Homebrew (not `qt`, which is Qt 6).
 * Building with downloaded Qt binaries is not officially supported. See the notes in [#7714](https://github.com/bitcoin/bitcoin/issues/7714).

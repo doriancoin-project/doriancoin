@@ -79,6 +79,9 @@ public:
         consensus.nLWMAHeight = 1243845; // LWMA activation height
         consensus.nLWMAFixHeight = 1244300; // LWMAv2 stabilized algorithm activation
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
+        consensus.nASERTHeight = 1246000; // ASERT activation height
+        consensus.nASERTHalfLife = 3600; // 1 hour halflife for fast response
+        consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty (equilibrium for ~1.3 MH/s)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
@@ -196,6 +199,9 @@ public:
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
         consensus.nLWMAFixHeight = 200; // Testnet LWMAv2 activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
+        consensus.nASERTHeight = 300; // Testnet ASERT activation height
+        consensus.nASERTHalfLife = 3600; // 1 hour halflife
+        consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
@@ -296,6 +302,9 @@ public:
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAFixHeight = 600; // Regtest LWMAv2 activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window
+        consensus.nASERTHeight = 700; // Regtest ASERT activation height
+        consensus.nASERTHalfLife = 3600; // 1 hour halflife
+        consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days

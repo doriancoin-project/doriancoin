@@ -79,6 +79,9 @@ public:
         consensus.nLWMAHeight = 1243845; // LWMA activation height
         consensus.nLWMAFixHeight = 1244300; // LWMAv2 stabilized algorithm activation
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
+        consensus.nASERTHeight = 1246000; // ASERT activation height
+        consensus.nASERTHalfLife = 3600; // 1 hour halflife for fast response
+        consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty (equilibrium for ~1.3 MH/s)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
@@ -101,9 +104,8 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nStartHeight = 2217600; // End Feb 2022
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = 2427264; // 364 days later
 
-        // Temporarily disabled after chain rollback - update once chain is stable
-        consensus.nMinimumChainWork = uint256{};
-        consensus.defaultAssumeValid = uint256{}; 
+        consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000001364c47d186dfb");
+        consensus.defaultAssumeValid = uint256S("0xf922c98138491ab892343ad0cd68c81e337ed096623610a55579a54dfc73c56b"); // 1247000
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -116,8 +118,8 @@ public:
         pchMessageStart[3] = 0xd1;
         nDefaultPort = 1949;
         nPruneAfterHeight = 100000;
-        m_assumed_blockchain_size = 22;
-        m_assumed_chain_state_size = 3;
+        m_assumed_blockchain_size = 1;
+        m_assumed_chain_state_size = 1;
 
         genesis = CreateGenesisBlock(1394325760, 385834689, 0x1e0ffff0, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
@@ -162,14 +164,23 @@ public:
                 {179620, uint256S("0x0120cff29f85e51828a034efe26fa1f48702de7a52b1cc25dd9d6d158f0a3a54")},
                 {240000, uint256S("0x021f02e45c710343617353ee887592db9a1c966bea66fbe587c25c63f2987e92")},
                 {300000, uint256S("0xe07995d7428de865e7463308a67a7c06eab50187b6e38f1d6cad8094665ac999")},
+                { 400000, uint256S("0xa5cf0e78be7426958fbb56658d652544604b79c80cca77889c5c55f1574ada7a")},
+                { 500000, uint256S("0xbb74bd10ee0873d4d9cb653bc11db53b9ff9a149c59e695f63df224d1fc7d6cc")},
+                { 600000, uint256S("0x71a242884d2a814ad57859b4081e81229d738c8fe631e805091c63c97a6ca997")},
+                { 700000, uint256S("0x4e7a512a4afd778acfbdbc5ca8521dc99e90307bce75ed7ff19dd79284cd0423")},
+                { 800000, uint256S("0x39c0f7db6a6757d7a6a9e718e97b6e1be79cc2099eeaa50e966ca7916240a15d")},
+                { 900000, uint256S("0x766f452b2192d2fbe0c139d866838e9425872df6d287d92aba556accbc9c5ff5")},
+                {1000000, uint256S("0xdb42b61eff7fd4196c0f591b085580a58683f88689cf7a4dce70d05b9bb5fa0b")},
+                {1100000, uint256S("0xea5a8ba369ff025aa8db6bd455b9f750f2f7e3c6faf5733419bcaecf2623b008")},
+                {1200000, uint256S("0x8bb146c1b567f7abe9d034770456039a0a8801501bdfc135d28f76c027a04235")},
             }
         };
 
         chainTxData = ChainTxData{
-            // Data from rpc: getchaintxstats 17280 fdb81fc2edae4e315716890bd343d814184ea50331cd47166e19120a5163a678
-            /* nTime    */ 1532969508,
-            /* nTxCount */ 295772,
-            /* dTxRate  */ 0.01
+            // Data from rpc: getchaintxstats at block 1247000
+            /* nTime    */ 1769959103,
+            /* nTxCount */ 1616411,
+            /* dTxRate  */ 0.0003293
         };
     }
 };
@@ -196,6 +207,9 @@ public:
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
         consensus.nLWMAFixHeight = 200; // Testnet LWMAv2 activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window (~112 minutes)
+        consensus.nASERTHeight = 300; // Testnet ASERT activation height
+        consensus.nASERTHalfLife = 3600; // 1 hour halflife
+        consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
@@ -296,6 +310,9 @@ public:
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAFixHeight = 600; // Regtest LWMAv2 activation height
         consensus.nLWMAWindow = 45; // 45-block averaging window
+        consensus.nASERTHeight = 700; // Regtest ASERT activation height
+        consensus.nASERTHalfLife = 3600; // 1 hour halflife
+        consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days

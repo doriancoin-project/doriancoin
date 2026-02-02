@@ -81,6 +81,12 @@ struct Params {
     int nLWMAFixHeight;
     /** LWMA averaging window (number of blocks) */
     int64_t nLWMAWindow;
+    /** Block height at which ASERT difficulty algorithm activates */
+    int nASERTHeight;
+    /** ASERT halflife in seconds (controls responsiveness) */
+    int64_t nASERTHalfLife;
+    /** Hardcoded anchor nBits for ASERT (target corresponding to ~0.04 difficulty) */
+    uint32_t nASERTAnchorBits;
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;

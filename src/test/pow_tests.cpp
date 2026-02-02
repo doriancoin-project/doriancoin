@@ -498,4 +498,286 @@ BOOST_AUTO_TEST_CASE(lwmav2_cap_enforcement)
     BOOST_CHECK(target >= minAllowedTarget);
 }
 
+/* Test that dispatch routes to ASERT after ASERT activation height */
+BOOST_AUTO_TEST_CASE(asert_dispatch_after_activation)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Set activation heights for testing
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+    params.nLWMAWindow = 45;
+
+    ResetASERTAnchorCache();
+
+    // Create chain of blocks spanning pre-ASERT and post-ASERT
+    const int numBlocks = 120;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nASERTHeight - 10 + i;
+        blocks[i].nTime = 1394325760 + i * params.nPowTargetSpacing;
+        blocks[i].nBits = 0x1d18ffe7;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + params.nPowTargetSpacing;
+
+    // After ASERT activation, dispatch should use ASERT
+    unsigned int result = GetNextWorkRequired(&blocks[numBlocks - 1], &header, params);
+    unsigned int asertResult = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+    BOOST_CHECK_EQUAL(result, asertResult);
+
+    ResetASERTAnchorCache();
+}
+
+/* Test ASERT steady state: constant hashrate produces stable difficulty */
+BOOST_AUTO_TEST_CASE(asert_steady_state)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+    params.nLWMAWindow = 45;
+
+    ResetASERTAnchorCache();
+
+    // Create a chain where all blocks are exactly on-target timing
+    const int numBlocks = 300;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nASERTHeight - 5 + i;
+        // Exactly on-target: each block at T=150 seconds apart
+        blocks[i].nTime = 1394325760 + i * params.nPowTargetSpacing;
+        blocks[i].nBits = 0x1d18ffe7;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + params.nPowTargetSpacing;
+
+    unsigned int result = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+
+    // With perfectly on-target blocks, ASERT should return the anchor difficulty
+    BOOST_CHECK_EQUAL(result, params.nASERTAnchorBits);
+
+    ResetASERTAnchorCache();
+}
+
+/* Test ASERT responds to fast blocks by increasing difficulty */
+BOOST_AUTO_TEST_CASE(asert_fast_blocks_increase_difficulty)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+    params.nLWMAWindow = 45;
+
+    ResetASERTAnchorCache();
+
+    // Create blocks with very fast solvetimes (10 seconds each instead of 150)
+    const int numBlocks = 60;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nASERTHeight - 5 + i;
+        blocks[i].nTime = 1394325760 + i * 10; // 10 seconds per block (15x too fast)
+        blocks[i].nBits = 0x1d18ffe7;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + 10;
+
+    unsigned int result = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+
+    // Fast blocks mean chain is ahead of schedule → target should DECREASE (harder)
+    arith_uint256 resultTarget;
+    resultTarget.SetCompact(result);
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERTAnchorBits);
+
+    BOOST_CHECK(resultTarget < anchorTarget);
+
+    ResetASERTAnchorCache();
+}
+
+/* Test ASERT responds to slow blocks by decreasing difficulty */
+BOOST_AUTO_TEST_CASE(asert_slow_blocks_decrease_difficulty)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+    params.nLWMAWindow = 45;
+
+    ResetASERTAnchorCache();
+
+    // Create blocks with slow solvetimes (600 seconds each instead of 150)
+    const int numBlocks = 30;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nASERTHeight - 5 + i;
+        blocks[i].nTime = 1394325760 + i * 600; // 600 seconds per block (4x too slow)
+        blocks[i].nBits = 0x1d18ffe7;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + 600;
+
+    unsigned int result = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+
+    // Slow blocks mean chain is behind schedule → target should INCREASE (easier)
+    arith_uint256 resultTarget;
+    resultTarget.SetCompact(result);
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERTAnchorBits);
+
+    BOOST_CHECK(resultTarget > anchorTarget);
+
+    ResetASERTAnchorCache();
+}
+
+/* Test ASERT clamps to powLimit (minimum difficulty) */
+BOOST_AUTO_TEST_CASE(asert_powlimit_clamp)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+    params.nLWMAWindow = 45;
+
+    ResetASERTAnchorCache();
+
+    // Create blocks with extremely slow solvetimes to push target way up
+    const int numBlocks = 30;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nASERTHeight - 5 + i;
+        blocks[i].nTime = 1394325760 + i * 86400; // 1 day per block
+        blocks[i].nBits = 0x1d18ffe7;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + 86400;
+
+    unsigned int result = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+
+    // Result should be clamped to powLimit
+    arith_uint256 resultTarget;
+    resultTarget.SetCompact(result);
+    arith_uint256 powLimit = UintToArith256(params.powLimit);
+
+    BOOST_CHECK(resultTarget <= powLimit);
+
+    ResetASERTAnchorCache();
+}
+
+/* Test ASERT halflife property: difficulty doubles when chain is exactly
+   one halflife behind schedule */
+BOOST_AUTO_TEST_CASE(asert_halflife_property)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    params.nLWMAHeight = 100;
+    params.nLWMAFixHeight = 150;
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+    params.nLWMAWindow = 45;
+
+    ResetASERTAnchorCache();
+
+    // Create a chain where the time is exactly one halflife AHEAD of schedule
+    // (blocks come too fast). This means difficulty should approximately double.
+    // Schedule: anchor is at height 200. For block at height 225 (25 blocks later),
+    // ideal time = 25 * 150 = 3750 seconds after anchor parent.
+    // Actual time = 3750 - 3600 = 150 seconds (one halflife ahead).
+    // Then exponent = -3600/3600 = -1, so target = anchor_target * 2^(-1) = anchor/2
+    const int numBlocks = 30;
+    std::vector<CBlockIndex> blocks(numBlocks);
+
+    // Anchor parent at time 0
+    blocks[0].pprev = nullptr;
+    blocks[0].nHeight = params.nASERTHeight - 1;
+    blocks[0].nTime = 1000000000;
+    blocks[0].nBits = 0x1d18ffe7;
+
+    // Anchor block
+    blocks[1].pprev = &blocks[0];
+    blocks[1].nHeight = params.nASERTHeight;
+    blocks[1].nTime = 1000000000 + params.nPowTargetSpacing;
+    blocks[1].nBits = 0x1d18ffe7;
+
+    // Fill in blocks after anchor, with timing that puts us exactly one halflife ahead
+    // We need: timeDelta - T * heightDelta = -halflife
+    // timeDelta = currentParentTime - anchorParentTime
+    // We want the block at height anchor+25 to have timeDelta - 25*150 = -3600
+    // So timeDelta = 25*150 - 3600 = 150
+    // currentParentTime = anchorParentTime + 150
+    for (int i = 2; i < numBlocks; i++) {
+        blocks[i].pprev = &blocks[i - 1];
+        blocks[i].nHeight = params.nASERTHeight + (i - 1);
+        blocks[i].nBits = 0x1d18ffe7;
+    }
+
+    // Set the last block (pindexLast) such that:
+    // heightDelta = (last_height + 1) - anchor_height = numBlocks - 1
+    // We want timeDelta - T * heightDelta = -halflife
+    // timeDelta = T * heightDelta - halflife
+    int heightDelta = (numBlocks - 1); // blocks after anchor
+    int64_t wantedTimeDelta = params.nPowTargetSpacing * heightDelta - params.nASERTHalfLife;
+    for (int i = 2; i < numBlocks; i++) {
+        // Spread time evenly (doesn't matter for ASERT, only endpoints matter)
+        blocks[i].nTime = blocks[0].nTime + (wantedTimeDelta * (i - 1)) / (numBlocks - 2);
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + 1;
+
+    unsigned int result = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+
+    // Target should be approximately anchor_target / 2 (difficulty doubled)
+    arith_uint256 resultTarget;
+    resultTarget.SetCompact(result);
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERTAnchorBits);
+    arith_uint256 halfAnchorTarget = anchorTarget >> 1;
+
+    // Allow some tolerance for fixed-point rounding (within 1%)
+    arith_uint256 tolerance = halfAnchorTarget / 100;
+    arith_uint256 diff = resultTarget > halfAnchorTarget ?
+        resultTarget - halfAnchorTarget : halfAnchorTarget - resultTarget;
+    BOOST_CHECK(diff <= tolerance);
+
+    ResetASERTAnchorCache();
+}
+
 BOOST_AUTO_TEST_SUITE_END()

@@ -251,12 +251,161 @@ unsigned int GetNextWorkRequiredLWMAv2(const CBlockIndex* pindexLast, const CBlo
     return nextTarget.GetCompact();
 }
 
+// ASERT - Absolutely Scheduled Exponential Rise Target
+// Based on BCH's aserti3-2d algorithm by Mark Lundeberg.
+// Eliminates oscillation by computing difficulty from total time deviation
+// relative to an ideal block schedule, using an exponential adjustment.
+//
+// For each block: target = anchor_target * 2^((time_delta - T * height_delta) / halflife)
+//
+// Properties:
+// - Mathematically proven to never oscillate
+// - No window lag - responds to each block individually
+// - With constant hashrate, difficulty stays perfectly flat
+
+// Cached anchor block pointer (set once, never changes after activation)
+static const CBlockIndex* g_asert_anchor = nullptr;
+
+void ResetASERTAnchorCache()
+{
+    g_asert_anchor = nullptr;
+}
+
+static const CBlockIndex* GetASERTAnchorBlock(const CBlockIndex* pindexLast, const Consensus::Params& params)
+{
+    // Return cached anchor if available
+    const CBlockIndex* pindex = g_asert_anchor;
+    if (pindex)
+        return pindex;
+
+    // Walk back to find the anchor block at nASERTHeight
+    pindex = pindexLast;
+    while (pindex->nHeight > params.nASERTHeight) {
+        pindex = pindex->pprev;
+        assert(pindex);
+    }
+    assert(pindex->nHeight == params.nASERTHeight);
+
+    // Cache for future calls
+    g_asert_anchor = pindex;
+    return pindex;
+}
+
+unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
+{
+    assert(pindexLast);
+
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+
+    // Handle regtest no-retarget mode
+    if (params.fPowNoRetargeting)
+        return pindexLast->nBits;
+
+    // Find the anchor block and its parent
+    const CBlockIndex* pindexAnchor = GetASERTAnchorBlock(pindexLast, params);
+    assert(pindexAnchor->pprev);
+
+    // Anchor target: hardcoded to ~0.04 difficulty for equilibrium
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERTAnchorBits);
+
+    // Time delta: current block's parent timestamp minus anchor's parent timestamp
+    // Using parent timestamps avoids manipulation of the current block's timestamp
+    const int64_t anchorParentTime = pindexAnchor->pprev->GetBlockTime();
+    const int64_t currentParentTime = pindexLast->GetBlockTime();
+    const int64_t timeDelta = currentParentTime - anchorParentTime;
+
+    // Height delta: height of block being computed minus anchor height
+    const int64_t nHeight = pindexLast->nHeight + 1;
+    const int64_t heightDelta = nHeight - params.nASERTHeight;
+
+    const int64_t T = params.nPowTargetSpacing;
+    const int64_t halfLife = params.nASERTHalfLife;
+
+    // Compute exponent in fixed-point with 16 fractional bits:
+    // exponent = (timeDelta - T * heightDelta) / halfLife
+    // In fixed-point: exponent_fp = (timeDelta - T * heightDelta) * 65536 / halfLife
+    const int64_t exponent = ((timeDelta - T * heightDelta) * int64_t(65536)) / halfLife;
+
+    // Decompose into integer shifts and fractional part
+    // We need: shifts (integer part) and frac in [0, 65536)
+    int32_t shifts;
+    uint16_t frac;
+
+    if (exponent >= 0) {
+        shifts = static_cast<int32_t>(exponent >> 16);
+        frac = static_cast<uint16_t>(exponent & 0xFFFF);
+    } else {
+        // For negative exponents, ensure frac is in [0, 65536)
+        // Example: -2.3 → shifts = -3, frac = 0.7 * 65536
+        const int64_t absExponent = -exponent;
+        shifts = -static_cast<int32_t>(absExponent >> 16);
+        const uint16_t remainder = static_cast<uint16_t>(absExponent & 0xFFFF);
+        if (remainder != 0) {
+            shifts--;
+            frac = 65536 - remainder;
+        } else {
+            frac = 0;
+        }
+    }
+
+    // Compute 2^(frac/65536) * 65536 using cubic polynomial approximation
+    // Coefficients from BCH aserti3-2d (designed to stay within uint64 bounds)
+    // Approximates: 65536 * 2^(frac/65536) for frac in [0, 65535]
+    uint32_t factor = 65536;
+    if (frac > 0) {
+        const uint64_t f = frac;
+        factor = 65536 + static_cast<uint32_t>(
+            (uint64_t(195766423245049) * f +
+             uint64_t(971821376) * f * f +
+             uint64_t(5127) * f * f * f +
+             (uint64_t(1) << 47)) >> 48);
+    }
+
+    // Apply fractional part: target = anchorTarget * factor / 65536
+    arith_uint256 nextTarget = anchorTarget * factor;
+    nextTarget >>= 16;
+
+    // Apply integer shifts (left shift = easier, right shift = harder)
+    if (shifts > 0) {
+        // Positive shifts: difficulty decreasing (target increasing)
+        // Clamp to avoid overflow past powLimit
+        if (shifts >= 256) {
+            return powLimit.GetCompact();
+        }
+        nextTarget <<= shifts;
+    } else if (shifts < 0) {
+        // Negative shifts: difficulty increasing (target decreasing)
+        const int32_t absShifts = -shifts;
+        if (absShifts >= 256) {
+            // Target would be essentially 0 - return maximum difficulty
+            return arith_uint256(1).GetCompact();
+        }
+        nextTarget >>= absShifts;
+    }
+
+    // Ensure target is at least 1 (maximum possible difficulty)
+    if (nextTarget == arith_uint256(0))
+        nextTarget = arith_uint256(1);
+
+    // Clamp to powLimit (minimum difficulty)
+    if (nextTarget > powLimit)
+        nextTarget = powLimit;
+
+    return nextTarget.GetCompact();
+}
+
 // Main dispatch function - routes to appropriate algorithm based on block height
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
     assert(pindexLast != nullptr);
 
     int nHeight = pindexLast->nHeight + 1;
+
+    // Use ASERT algorithm after ASERT activation height
+    if (nHeight > params.nASERTHeight) {
+        return GetNextWorkRequiredASERT(pindexLast, pblock, params);
+    }
 
     // Use stabilized LWMAv2 algorithm after fix height
     if (nHeight >= params.nLWMAFixHeight) {

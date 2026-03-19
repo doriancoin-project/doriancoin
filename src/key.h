@@ -128,6 +128,12 @@ public:
      */
     bool SignCompact(const uint256& hash, std::vector<unsigned char>& vchSig) const;
 
+    /**
+     * Create a BIP-340 Schnorr signature.
+     * Returns a 64-byte signature.
+     */
+    bool SignSchnorr(const uint256& hash, std::vector<unsigned char>& vchSig) const;
+
     //! Derive BIP32 child key.
     bool Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc) const;
 

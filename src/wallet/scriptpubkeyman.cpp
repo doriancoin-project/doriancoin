@@ -331,6 +331,7 @@ bool LegacyScriptPubKeyMan::Encrypt(const CKeyingMaterial& master_key, WalletBat
 
 bool LegacyScriptPubKeyMan::GetReservedDestination(const OutputType type, bool internal, CTxDestination& address, int64_t& index, CKeyPool& keypool)
 {
+    WalletLogPrintf("TAPROOT_DEBUG GetReservedDestination type=%d internal=%d\n", static_cast<int>(type), internal);
     LOCK(cs_KeyStore);
     if (!CanGetAddresses(GetPurpose(type, internal))) {
         return false;
@@ -345,6 +346,7 @@ bool LegacyScriptPubKeyMan::GetReservedDestination(const OutputType type, bool i
 
 bool LegacyScriptPubKeyMan::TopUpInactiveHDChain(const CKeyID seed_id, int64_t index, const KeyPurpose purpose)
 {
+
     LOCK(cs_KeyStore);
 
     if (m_storage.IsLocked()) return false;
@@ -1307,6 +1309,7 @@ bool LegacyScriptPubKeyMan::NewKeyPool()
 
 bool LegacyScriptPubKeyMan::TopUp(unsigned int kpSize)
 {
+
     if (!CanGenerateKeys()) {
         return false;
     }
@@ -1411,6 +1414,7 @@ void LegacyScriptPubKeyMan::ReturnDestination(int64_t nIndex, const KeyPurpose p
 
 bool LegacyScriptPubKeyMan::GetKeyFromPool(CPubKey& result, const OutputType type, bool internal)
 {
+
     if (!CanGetAddresses(GetPurpose(type, internal))) {
         return false;
     }
@@ -1433,6 +1437,7 @@ bool LegacyScriptPubKeyMan::GetKeyFromPool(CPubKey& result, const OutputType typ
 
 bool LegacyScriptPubKeyMan::ReserveKeyFromKeyPool(int64_t& nIndex, CKeyPool& keypool, const KeyPurpose purpose)
 {
+
     nIndex = -1;
     keypool.vchPubKey = CPubKey();
     {
@@ -1513,6 +1518,7 @@ void LegacyScriptPubKeyMan::LearnAllRelatedScripts(const CPubKey& key)
 
 void LegacyScriptPubKeyMan::MarkReserveKeysAsUsed(int64_t keypool_id)
 {
+
     AssertLockHeld(cs_KeyStore);
     bool mweb = set_mweb_keypool.count(keypool_id);
     bool internal = !mweb && setInternalKeyPool.count(keypool_id);

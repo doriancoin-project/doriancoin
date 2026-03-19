@@ -11,6 +11,8 @@
 
 #include <secp256k1.h>
 #include <secp256k1_recovery.h>
+#include <secp256k1_extrakeys.h>
+#include <secp256k1_schnorrsig.h>
 
 static secp256k1_context* secp256k1_context_sign = nullptr;
 
@@ -241,6 +243,19 @@ bool CKey::VerifyPubKey(const CPubKey& pubkey) const {
     std::vector<unsigned char> vchSig;
     Sign(hash, vchSig);
     return pubkey.Verify(hash, vchSig);
+}
+
+bool CKey::SignSchnorr(const uint256& hash, std::vector<unsigned char>& vchSig) const {
+    if (!fValid)
+        return false;
+    vchSig.resize(64);
+    secp256k1_schnorrsig sig;
+    int nonce_is_negated;
+    int ret = secp256k1_schnorrsig_sign(secp256k1_context_sign, &sig, &nonce_is_negated, hash.begin(), begin(), nullptr, nullptr);
+    if (!ret)
+        return false;
+    ret = secp256k1_schnorrsig_serialize(secp256k1_context_sign, vchSig.data(), &sig);
+    return ret;
 }
 
 bool CKey::SignCompact(const uint256 &hash, std::vector<unsigned char>& vchSig) const {

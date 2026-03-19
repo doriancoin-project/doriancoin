@@ -6,8 +6,10 @@
 #include <script/sign.h>
 
 #include <key.h>
+#include <logging.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
+#include <pubkey.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
 #include <uint256.h>
@@ -24,6 +26,13 @@ bool MutableTransactionSignatureCreator::CreateSig(const SigningProvider& provid
 
     // Signing with uncompressed keys is disabled in witness scripts
     if (sigversion == SigVersion::WITNESS_V0 && !key.IsCompressed())
+        return false;
+
+    // Taproot signing requires PrecomputedTransactionData for sighash
+    // computation (BIP 341), which MutableTransactionSignatureCreator
+    // does not have. Return false so the caller knows we can't sign.
+    // Ord handles its own Taproot signing externally.
+    if (sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT)
         return false;
 
     uint256 hash = SignatureHash(scriptCode, *txTo, nIn, nHashType, amount, sigversion);
@@ -111,10 +120,14 @@ static bool SignStep(const SigningProvider& provider, const BaseSignatureCreator
     case TxoutType::NONSTANDARD:
     case TxoutType::NULL_DATA:
     case TxoutType::WITNESS_UNKNOWN:
-    case TxoutType::WITNESS_V1_TAPROOT:
     case TxoutType::WITNESS_MWEB_PEGIN:
     case TxoutType::WITNESS_MWEB_HOGADDR:
         return false;
+    case TxoutType::WITNESS_V1_TAPROOT:
+        // vSolutions[0] = witness version, vSolutions[1] = 32-byte x-only pubkey
+        // Return the x-only pubkey; ProduceSignature will handle the witness construction
+        ret.push_back(vSolutions[1]);
+        return true;
     case TxoutType::PUBKEY:
         if (!CreateSig(creator, sigdata, provider, sig, CPubKey(vSolutions[0]), scriptPubKey, sigversion)) return false;
         ret.push_back(std::move(sig));
@@ -202,6 +215,19 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
 {
     if (sigdata.complete) return true;
 
+    // Identify the script type for logging
+    {
+        std::vector<std::vector<unsigned char>> tmpSol;
+        TxoutType tmpType = Solver(fromPubKey, tmpSol);
+        if (tmpType == TxoutType::WITNESS_V1_TAPROOT) {
+            LogPrintf("TAPROOT_DEBUG ProduceSignature called for WITNESS_V1_TAPROOT script, existing_witness_null=%d\n", sigdata.scriptWitness.IsNull());
+        }
+    }
+
+    // Save existing witness before clearing — needed to preserve pre-signed
+    // Taproot witnesses (e.g., ord's script-path reveals) if we can't sign.
+    CScriptWitness existingWitness = sigdata.scriptWitness;
+
     std::vector<valtype> result;
     TxoutType whichType;
     bool solved = SignStep(provider, creator, fromPubKey, result, whichType, SigVersion::BASE, sigdata);
@@ -240,6 +266,19 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         sigdata.scriptWitness.stack = result;
         sigdata.witness = true;
         result.clear();
+    } else if (solved && whichType == TxoutType::WITNESS_V1_TAPROOT) {
+        // The wallet cannot sign Taproot inputs — it lacks the
+        // PrecomputedTransactionData required for BIP 341 sighash.
+        // If the input already has a witness (e.g., ord pre-signed it),
+        // preserve it. Otherwise, report that we can't sign.
+        if (!existingWitness.IsNull()) {
+            sigdata.scriptWitness = existingWitness;
+            sigdata.witness = true;
+            sigdata.complete = true;
+            result.clear();
+            return true;
+        }
+        solved = false;
     } else if (solved && whichType == TxoutType::WITNESS_UNKNOWN) {
         sigdata.witness = true;
     }
@@ -294,6 +333,20 @@ SignatureData DataFromTransaction(const CMutableTransaction& tx, unsigned int nI
     assert(tx.vin.size() > nIn);
     data.scriptSig = tx.vin[nIn].scriptSig;
     data.scriptWitness = tx.vin[nIn].scriptWitness;
+
+    // For Taproot inputs, skip VerifyScript — MutableTransactionSignatureChecker
+    // lacks PrecomputedTransactionData required for Schnorr signature verification.
+    // If the input has a witness, assume it's complete (pre-signed by ord).
+    {
+        std::vector<std::vector<unsigned char>> solutions;
+        if (Solver(txout.scriptPubKey, solutions) == TxoutType::WITNESS_V1_TAPROOT) {
+            if (!data.scriptWitness.IsNull()) {
+                data.complete = true;
+            }
+            return data;
+        }
+    }
+
     Stacks stack(data);
 
     // Get signatures
@@ -404,6 +457,7 @@ class DummySignatureChecker final : public BaseSignatureChecker
 public:
     DummySignatureChecker() {}
     bool CheckECDSASignature(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override { return true; }
+    bool CheckSchnorrSignature(Span<const unsigned char> sig, Span<const unsigned char> pubkey, SigVersion sigversion, const ScriptExecutionData& execdata, ScriptError* serror = nullptr) const override { return true; }
 };
 const DummySignatureChecker DUMMY_CHECKER;
 
@@ -416,6 +470,9 @@ public:
     const BaseSignatureChecker& Checker() const override { return DUMMY_CHECKER; }
     bool CreateSig(const SigningProvider& provider, std::vector<unsigned char>& vchSig, const CKeyID& keyid, const CScript& scriptCode, SigVersion sigversion) const override
     {
+        if (sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT) {
+            return false;
+        }
         // Create a dummy signature that is a valid DER-encoding
         vchSig.assign(m_r_len + m_s_len + 7, '\000');
         vchSig[0] = 0x30;
@@ -465,13 +522,13 @@ bool IsSegWitOutput(const SigningProvider& provider, const CScript& script)
 {
     std::vector<valtype> solutions;
     auto whichtype = Solver(script, solutions);
-    if (whichtype == TxoutType::WITNESS_V0_SCRIPTHASH || whichtype == TxoutType::WITNESS_V0_KEYHASH || whichtype == TxoutType::WITNESS_UNKNOWN) return true;
+    if (whichtype == TxoutType::WITNESS_V0_SCRIPTHASH || whichtype == TxoutType::WITNESS_V0_KEYHASH || whichtype == TxoutType::WITNESS_V1_TAPROOT || whichtype == TxoutType::WITNESS_UNKNOWN) return true;
     if (whichtype == TxoutType::SCRIPTHASH) {
         auto h160 = uint160(solutions[0]);
         CScript subscript;
         if (provider.GetCScript(CScriptID{h160}, subscript)) {
             whichtype = Solver(subscript, solutions);
-            if (whichtype == TxoutType::WITNESS_V0_SCRIPTHASH || whichtype == TxoutType::WITNESS_V0_KEYHASH || whichtype == TxoutType::WITNESS_UNKNOWN) return true;
+            if (whichtype == TxoutType::WITNESS_V0_SCRIPTHASH || whichtype == TxoutType::WITNESS_V0_KEYHASH || whichtype == TxoutType::WITNESS_V1_TAPROOT || whichtype == TxoutType::WITNESS_UNKNOWN) return true;
         }
     }
     return false;
@@ -485,6 +542,7 @@ bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, 
     // transaction to avoid rehashing.
     const CTransaction txConst(mtx);
     // Sign what we can:
+    LogPrintf("TAPROOT_DEBUG SignTransaction processing %d inputs\n", mtx.vin.size());
     for (unsigned int i = 0; i < mtx.vin.size(); i++) {
         CTxIn& txin = mtx.vin[i];
         auto coin = coins.find(txin.prevout);
@@ -495,17 +553,41 @@ bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, 
         const CScript& prevPubKey = coin->second.out.scriptPubKey;
         const CAmount& amount = coin->second.out.nValue;
 
+        std::vector<std::vector<unsigned char>> dbgSol;
+        TxoutType dbgType = Solver(prevPubKey, dbgSol);
+        LogPrintf("TAPROOT_DEBUG SignTransaction input %d: prevout=%s, scriptType=%d, amount=%d, has_witness=%d\n",
+            i, txin.prevout.ToString(), static_cast<int>(dbgType), amount, !txin.scriptWitness.IsNull());
+
         SignatureData sigdata = DataFromTransaction(mtx, i, coin->second.out);
+        LogPrintf("TAPROOT_DEBUG SignTransaction input %d: after DataFromTransaction, complete=%d\n", i, sigdata.complete);
+
         // Only sign SIGHASH_SINGLE if there's a corresponding output:
         if (!fHashSingle || (i < mtx.vout.size())) {
             ProduceSignature(*keystore, MutableTransactionSignatureCreator(&mtx, i, amount, nHashType), prevPubKey, sigdata);
         }
+        LogPrintf("TAPROOT_DEBUG SignTransaction input %d: after ProduceSignature, complete=%d\n", i, sigdata.complete);
 
         UpdateInput(txin, sigdata);
 
         // amount must be specified for valid segwit signature
         if (amount == MAX_MONEY && !txin.scriptWitness.IsNull()) {
             input_errors[i] = "Missing amount";
+            continue;
+        }
+
+        LogPrintf("TAPROOT_DEBUG SignTransaction input %d: about to VerifyScript\n", i);
+
+        // Skip VerifyScript for Taproot inputs — the TransactionSignatureChecker
+        // lacks PrecomputedTransactionData which is required for Taproot sighash
+        // verification (BIP 341). CheckSchnorrSignature asserts txdata != null.
+        // For Taproot inputs with pre-existing witnesses (signed by ord), trust
+        // the witness — the network will validate it on broadcast.
+        if (dbgType == TxoutType::WITNESS_V1_TAPROOT) {
+            if (sigdata.complete) {
+                input_errors.erase(i);
+            } else {
+                input_errors[i] = "Taproot input not signed";
+            }
             continue;
         }
 

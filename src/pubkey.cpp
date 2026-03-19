@@ -5,8 +5,10 @@
 
 #include <pubkey.h>
 
+#include <hash.h>
 #include <secp256k1.h>
 #include <secp256k1_recovery.h>
+#include <secp256k1_extrakeys.h>
 #include <secp256k1_schnorrsig.h>
 
 namespace
@@ -171,6 +173,30 @@ XOnlyPubKey::XOnlyPubKey(Span<const unsigned char> bytes)
 {
     assert(bytes.size() == 32);
     std::copy(bytes.begin(), bytes.end(), m_keydata.begin());
+}
+
+XOnlyPubKey::XOnlyPubKey(const CPubKey& pubkey)
+{
+    assert(pubkey.IsCompressed());
+    // Drop the 0x02/0x03 prefix byte to get the 32-byte x coordinate
+    std::copy(pubkey.begin() + 1, pubkey.begin() + 33, m_keydata.begin());
+}
+
+uint256 XOnlyPubKey::ComputeTapTweakHash() const
+{
+    // BIP 341 tagged hash: SHA256(SHA256("TapTweak") || SHA256("TapTweak") || pubkey)
+    // For key-path only (no script tree), the merkle root is empty.
+    const unsigned char tag[] = {'T','a','p','T','w','e','a','k'};
+    uint256 taghash;
+    CSHA256().Write(tag, sizeof(tag)).Finalize(taghash.begin());
+
+    uint256 result;
+    CSHA256()
+        .Write(taghash.begin(), 32)
+        .Write(taghash.begin(), 32)
+        .Write(m_keydata.begin(), 32)
+        .Finalize(result.begin());
+    return result;
 }
 
 bool XOnlyPubKey::VerifySchnorr(const uint256& msg, Span<const unsigned char> sigbytes) const

@@ -633,7 +633,10 @@ OutputType TxAssembler::GetChangeType(const InProcessTx& new_tx) const
     Optional<OutputType> change_type = new_tx.coin_control.m_change_type ? *new_tx.coin_control.m_change_type : m_wallet.m_default_change_type;
 
     // If -changetype is specified, always use that change type.
+    // But never use BECH32M for change — Taproot change addresses are not
+    // supported by the legacy keypool and would cause an infinite loop.
     if (change_type) {
+        if (*change_type == OutputType::BECH32M) return OutputType::BECH32;
         return *change_type;
     }
 
@@ -641,6 +644,11 @@ OutputType TxAssembler::GetChangeType(const InProcessTx& new_tx) const
     // (even if some of the outputs are P2WPKH or P2WSH).
     if (m_wallet.m_default_address_type == OutputType::LEGACY) {
         return OutputType::LEGACY;
+    }
+
+    // Never use BECH32M for change even if it's the default address type.
+    if (m_wallet.m_default_address_type == OutputType::BECH32M) {
+        return OutputType::BECH32;
     }
 
     // If any destination is P2WPKH or P2WSH, use P2WPKH for the change output.

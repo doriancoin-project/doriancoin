@@ -213,8 +213,14 @@ private:
     uint256 m_keydata;
 
 public:
+    /** Construct an empty x-only pubkey. */
+    XOnlyPubKey() = default;
+
     /** Construct an x-only pubkey from exactly 32 bytes. */
     XOnlyPubKey(Span<const unsigned char> bytes);
+
+    /** Construct an x-only pubkey from a compressed CPubKey (drops the prefix byte). */
+    explicit XOnlyPubKey(const CPubKey& pubkey);
 
     /** Verify a Schnorr signature against this public key.
      *
@@ -223,9 +229,16 @@ public:
     bool VerifySchnorr(const uint256& msg, Span<const unsigned char> sigbytes) const;
     bool CheckPayToContract(const XOnlyPubKey& base, const uint256& hash, bool parity) const;
 
+    /** Compute the Taproot tweak hash: tagged_hash("TapTweak", pubkey) */
+    uint256 ComputeTapTweakHash() const;
+
     const unsigned char& operator[](int pos) const { return *(m_keydata.begin() + pos); }
     const unsigned char* data() const { return m_keydata.begin(); }
     size_t size() const { return m_keydata.size(); }
+
+    bool operator==(const XOnlyPubKey& other) const { return m_keydata == other.m_keydata; }
+    bool operator!=(const XOnlyPubKey& other) const { return m_keydata != other.m_keydata; }
+    bool operator<(const XOnlyPubKey& other) const { return m_keydata < other.m_keydata; }
 };
 
 struct CExtPubKey {

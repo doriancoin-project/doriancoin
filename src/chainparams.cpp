@@ -57,6 +57,11 @@ static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits
     return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce, nBits, nVersion, genesisReward);
 }
 
+static std::vector<uint256> GetFrozenMWEBOutputIDs()
+{
+    return {};
+}
+
 /**
  * Main network
  */
@@ -106,6 +111,9 @@ public:
 
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000001364c47d186dfb");
         consensus.defaultAssumeValid = uint256S("0xf922c98138491ab892343ad0cd68c81e337ed096623610a55579a54dfc73c56b"); // 1247000
+
+        consensus.mweb_input_metadata_grandfather_blockhash = uint256S("0x33f61a6c941efd807b2b17f26e61a59ccab2730bc93abf0ce9759d513e08e5af");
+        consensus.frozen_mweb_output_ids = GetFrozenMWEBOutputIDs();
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.

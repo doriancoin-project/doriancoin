@@ -249,6 +249,7 @@ BASE_SCRIPTS = [
     'mweb_mining.py',
     'mweb_reorg.py',
     'mweb_dbcrash.py',
+    'mweb_duplicate_pegin.py',
     'mweb_p2p.py',
     'mweb_p2p_mutated_compactblock.py',
     'mweb_p2p_mutated_block_submitblock.py',

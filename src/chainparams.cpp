@@ -368,6 +368,7 @@ public:
 
         consensus.nMinimumChainWork = uint256{};
         consensus.defaultAssumeValid = uint256{};
+        consensus.frozen_mweb_output_ids = GetFrozenMWEBOutputIDs();
 
         pchMessageStart[0] = 0xd2;
         pchMessageStart[1] = 0xb0;

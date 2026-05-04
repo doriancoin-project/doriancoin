@@ -253,6 +253,7 @@ BASE_SCRIPTS = [
     'mweb_p2p.py',
     'mweb_p2p_mutated_compactblock.py',
     'mweb_p2p_mutated_block_submitblock.py',
+    'mweb_pre_activation_hogex_marker.py',
     'mweb_pegout_all.py',
     'mweb_node_compatibility.py',
     'mweb_wallet_address.py',

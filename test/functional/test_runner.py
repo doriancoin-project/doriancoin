@@ -250,6 +250,8 @@ BASE_SCRIPTS = [
     'mweb_reorg.py',
     'mweb_dbcrash.py',
     'mweb_p2p.py',
+    'mweb_p2p_mutated_compactblock.py',
+    'mweb_p2p_mutated_block_submitblock.py',
     'mweb_pegout_all.py',
     'mweb_node_compatibility.py',
     'mweb_wallet_address.py',

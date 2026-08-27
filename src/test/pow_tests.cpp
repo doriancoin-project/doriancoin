@@ -917,4 +917,187 @@ BOOST_AUTO_TEST_CASE(asert_halflife_property)
     ResetASERTAnchorCache();
 }
 
+/* ---------------------------------------------------------------------------
+   Difficulty-reset fork (second ASERT anchor) at mainnet height 1359052.
+   --------------------------------------------------------------------------- */
+
+/* The fork block itself must be mined at exactly nASERT2AnchorBits. This is the
+   block that was unmineable: at height 1359052 the old code returned 0x01010000
+   (target 1). It is also the anchor for the new schedule, so its target cannot
+   be derived from one. */
+BOOST_AUTO_TEST_CASE(asert2_fork_block_uses_fixed_anchor_bits)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    const Consensus::Params& params = chainParams->GetConsensus();
+
+    BOOST_CHECK_EQUAL(params.nASERT2Height, 1359052);
+    BOOST_CHECK_EQUAL(params.nASERT2AnchorBits, 0x1d027ffdU);
+
+    ResetASERTAnchorCache();
+
+    // The real stalled tip.
+    CBlockIndex tip;
+    tip.pprev = nullptr;
+    tip.nHeight = 1359051;
+    tip.nTime = 1787340378;
+    tip.nBits = 0x1b49d9c4;
+
+    CBlockHeader header;
+    header.nTime = tip.nTime + 150;
+
+    const unsigned int bits = GetNextWorkRequired(&tip, &header, params);
+
+    BOOST_CHECK_EQUAL(bits, params.nASERT2AnchorBits);
+    BOOST_CHECK_MESSAGE(bits != 0x01010000U, "fork block is still unmineable");
+
+    // And it must be comfortably easier than the pre-stall difficulty.
+    arith_uint256 forkTarget, stallTarget;
+    forkTarget.SetCompact(bits);
+    stallTarget.SetCompact(tip.nBits);
+    BOOST_CHECK(forkTarget > stallTarget);
+
+    ResetASERTAnchorCache();
+}
+
+/* The reset must NOT inherit the 6.6-day schedule debt the stall created.
+   The anchor's schedule origin is its own timestamp, so however long the gap
+   between the anchor and its parent was, the first block after the anchor sees
+   a deviation of exactly zero and is mined at the anchor difficulty - not at
+   powLimit followed by a ~4,100-block catch-up burst. */
+BOOST_AUTO_TEST_CASE(asert2_reset_does_not_inherit_stall_debt)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    ResetASERTAnchorCache();
+
+    // Stalled tip, then the fork block mined a further 6 days later.
+    CBlockIndex stalled;
+    stalled.pprev = nullptr;
+    stalled.nHeight = 1359051;
+    stalled.nTime = 1787340378;
+    stalled.nBits = 0x1b49d9c4;
+
+    CBlockIndex anchor;
+    anchor.pprev = &stalled;
+    anchor.nHeight = params.nASERT2Height;         // 1359052
+    anchor.nTime = stalled.nTime + 6 * 24 * 3600;  // fork goes live 6 days later
+    anchor.nBits = params.nASERT2AnchorBits;
+
+    CBlockHeader header;
+    header.nTime = anchor.nTime + 150;
+
+    const unsigned int bits = GetNextWorkRequired(&anchor, &header, params);
+
+    // Deviation is exactly zero, so the target is exactly the anchor target.
+    arith_uint256 got, want;
+    got.SetCompact(bits);
+    want.SetCompact(params.nASERT2AnchorBits);
+    BOOST_CHECK_EQUAL(bits, params.nASERT2AnchorBits);
+
+    // Explicitly: it must not have collapsed to powLimit, which is what
+    // inheriting the debt would have produced.
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+    BOOST_CHECK_MESSAGE(got.GetCompact() != powLimit.GetCompact(),
+                        "reset inherited the stall debt and fell to powLimit");
+
+    // The size of the pre-anchor gap must be irrelevant - repeat with a
+    // 60-day gap and expect the identical answer.
+    ResetASERTAnchorCache();
+    anchor.nTime = stalled.nTime + 60 * 24 * 3600;
+    header.nTime = anchor.nTime + 150;
+    BOOST_CHECK_EQUAL(GetNextWorkRequired(&anchor, &header, params), params.nASERT2AnchorBits);
+
+    ResetASERTAnchorCache();
+}
+
+/* Re-anchoring must not disturb the existing chain: every height at or below
+   the fork still routes to the original anchor, so blocks 1246001-1359051
+   validate bit-for-bit as they always did. */
+BOOST_AUTO_TEST_CASE(asert2_does_not_rewrite_history)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+    params.nASERTHeight = 200; // shrink anchor 1 so a short test chain suffices
+
+    const int numBlocks = 30;
+    std::vector<CBlockIndex> blocks(numBlocks);
+    for (int i = 0; i < numBlocks; i++) {
+        blocks[i].pprev = i > 0 ? &blocks[i - 1] : nullptr;
+        blocks[i].nHeight = params.nASERTHeight - 1 + i;
+        blocks[i].nTime = 1769808705 + i * 140; // slightly fast
+        blocks[i].nBits = params.nASERTAnchorBits;
+    }
+
+    CBlockHeader header;
+    header.nTime = blocks[numBlocks - 1].nTime + 150;
+
+    // Heights here are far below nASERT2Height (1359052), so the dispatcher
+    // must produce exactly what the untouched anchor-1 path produces.
+    ResetASERTAnchorCache();
+    const unsigned int viaDispatch = GetNextWorkRequired(&blocks[numBlocks - 1], &header, params);
+    ResetASERTAnchorCache();
+    const unsigned int viaAnchor1 = GetNextWorkRequiredASERT(&blocks[numBlocks - 1], &header, params);
+
+    BOOST_CHECK_EQUAL(viaDispatch, viaAnchor1);
+    BOOST_CHECK(viaDispatch != params.nASERT2AnchorBits);
+
+    ResetASERTAnchorCache();
+}
+
+/* The re-anchored schedule must still retarget in the right direction, and a
+   long post-fork stall must clamp to powLimit rather than brick. */
+BOOST_AUTO_TEST_CASE(asert2_retargets_in_the_right_direction)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERT2AnchorBits);
+
+    // Helper: build anchor + one descendant whose timestamp puts the chain
+    // `driftSeconds` off the ideal schedule, and return the next target.
+    auto nextTargetWithDrift = [&](int64_t driftSeconds) {
+        ResetASERTAnchorCache();
+        static CBlockIndex anchor, child;
+        anchor.pprev = nullptr;
+        anchor.nHeight = params.nASERT2Height;
+        anchor.nTime = 1787860000;
+        anchor.nBits = params.nASERT2AnchorBits;
+
+        child.pprev = &anchor;
+        child.nHeight = params.nASERT2Height + 1;
+        // On schedule child.nTime would be anchor.nTime + T.
+        child.nTime = anchor.nTime + params.nPowTargetSpacing + driftSeconds;
+        child.nBits = params.nASERT2AnchorBits;
+
+        CBlockHeader h;
+        h.nTime = child.nTime + params.nPowTargetSpacing;
+        arith_uint256 t;
+        t.SetCompact(GetNextWorkRequired(&child, &h, params));
+        return t;
+    };
+
+    const arith_uint256 onSchedule = nextTargetWithDrift(0);
+    BOOST_CHECK_EQUAL(onSchedule.GetCompact(), params.nASERT2AnchorBits);
+
+    // Behind schedule -> easier (bigger target).
+    BOOST_CHECK(nextTargetWithDrift(3600) > onSchedule);
+    // Ahead of schedule -> harder (smaller target).
+    BOOST_CHECK(nextTargetWithDrift(-100) < onSchedule);
+
+    // One halflife behind roughly halves the difficulty (doubles the target).
+    const arith_uint256 oneHalfLifeLate = nextTargetWithDrift(params.nASERTHalfLife);
+    BOOST_CHECK(oneHalfLifeLate > onSchedule * 19 / 10);
+    BOOST_CHECK(oneHalfLifeLate < onSchedule * 21 / 10);
+
+    // A 30-day post-fork stall must clamp to powLimit, never to target 1.
+    const arith_uint256 longStall = nextTargetWithDrift(30 * 24 * 3600);
+    BOOST_CHECK_EQUAL(longStall.GetCompact(), powLimit.GetCompact());
+    BOOST_CHECK(longStall > arith_uint256(1));
+
+    ResetASERTAnchorCache();
+}
+
 BOOST_AUTO_TEST_SUITE_END()

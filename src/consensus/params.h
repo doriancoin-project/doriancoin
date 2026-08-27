@@ -88,6 +88,14 @@ struct Params {
     int64_t nASERTHalfLife;
     /** Hardcoded anchor nBits for ASERT (target corresponding to ~0.04 difficulty) */
     uint32_t nASERTAnchorBits;
+    /** Block height of the second ASERT anchor (the difficulty-reset fork block).
+     *  Blocks BELOW this height keep using the original anchor, so the existing
+     *  chain continues to validate bit-for-bit. The block AT this height is
+     *  mined at exactly nASERT2AnchorBits, and blocks above it run ASERT on a
+     *  fresh schedule whose origin is this block's own timestamp. */
+    int nASERT2Height;
+    /** Hardcoded nBits for the second ASERT anchor (~0.4 difficulty) */
+    uint32_t nASERT2AnchorBits;
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;

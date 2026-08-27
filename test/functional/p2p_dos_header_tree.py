@@ -12,7 +12,7 @@ from test_framework.p2p import (
     P2PInterface,
     msg_headers,
 )
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 
 import os
 
@@ -22,6 +22,17 @@ class RejectLowDifficultyHeadersTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.chain = 'testnet4'  # Use testnet chain because it has an early checkpoint
         self.num_nodes = 2
+
+    def skip_test_if_missing_module(self):
+        # data/blockheader_testnet4.hex holds 300 Litecoin testnet headers, and the
+        # test also relies on testnet having an early checkpoint to reject the fork.
+        # Our testnet was reset (see "consensus: reset testnet to a working state"),
+        # so neither exists: those headers do not connect to our genesis, and the
+        # only checkpoint left is genesis itself. Regenerating them means mining 300
+        # real testnet blocks at ~2^20 scrypt hashes each. Re-enable by dumping the
+        # first 300 headers of a mined Doriancoin testnet into the data file and
+        # restoring an early testnet checkpoint above the fork height.
+        raise SkipTest("needs a mined Doriancoin testnet chain and an early testnet checkpoint")
 
     def add_options(self, parser):
         parser.add_argument(

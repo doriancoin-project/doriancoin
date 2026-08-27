@@ -6,7 +6,7 @@
 
 import copy
 
-from test_framework.ltc_util import setup_mweb_chain
+from test_framework.dsv_util import setup_mweb_chain
 from test_framework.messages import CBlock, FromHex, msg_block
 from test_framework.p2p import P2PDataStore
 from test_framework.test_framework import BitcoinTestFramework

@@ -217,7 +217,7 @@ public:
         consensus.BIP66Height = 0; // 8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573
         consensus.CSVHeight = 0; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
         consensus.SegwitHeight = 0; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
-        consensus.MWEBHeight = 0; // MWEB always active on testnet
+        consensus.MWEBHeight = 432; // MWEB activation; must be > 0, see IsMWEBEnabled/is_first_hogex
         consensus.TaprootHeight = 0; // Taproot always active on testnet
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
         consensus.nLWMAFixHeight = 200; // Testnet LWMAv2 activation height
@@ -250,7 +250,7 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = 2419200; // 364 days later
 
         consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000000001");
-        consensus.defaultAssumeValid = uint256S("0xf19dfbdc0e6c399ef45d315d89fc3e972dd8da74503252bacaf664f64d86e6f6"); // 
+        consensus.defaultAssumeValid = uint256{}; // testnet is being reset; no assumed-valid block yet
 
         pchMessageStart[0] = 0xd1;
         pchMessageStart[1] = 0xd2;
@@ -268,10 +268,9 @@ public:
 
         vFixedSeeds.clear();
         vSeeds.clear();
-        // nodes with support for servicebits filtering should be at the top
-        vSeeds.emplace_back("testnet-seed.doriancointools.com");
-        vSeeds.emplace_back("seed-b.doriancoin.loshan.co.uk");
-        vSeeds.emplace_back("dnsseed-testnet.thrasher.io");
+        // testnet is being reset; the inherited Litecoin DNS seeds would only
+        // return peers that reject our network magic. Use -addnode/-connect
+        // until a Doriancoin testnet seed exists.
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,22);
@@ -283,7 +282,7 @@ public:
         bech32_hrp = "tdsv";
         mweb_hrp = "tmweb";
 
-        vFixedSeeds = std::vector<uint8_t>(std::begin(chainparams_seed_test), std::end(chainparams_seed_test));
+        // vFixedSeeds intentionally left empty: testnet is being reset.
 
         fDefaultConsistencyChecks = false;
         fRequireStandard = false;
@@ -292,15 +291,15 @@ public:
 
         checkpointData = {
             {
-                {2056, uint256S("17748a31ba97afdc9a4f86837a39d287e3e7c7290a08a1d816c5969c78a83289")},
+                {0, uint256S("0x707769464eb59fdd7b75cdbc5f0e72226345281852325c965b8ee1fd592fbf51")},
             }
         };
 
         chainTxData = ChainTxData{
-            // Data from RPC: getchaintxstats 4096 36d8ad003bac090cf7bf4e24fbe1d319554c8933b9314188d6096ac12648764d
-            /* nTime    */ 1565582448,
-            /* nTxCount */ 2848910,
-            /* dTxRate  */ 0.02265200874042768,
+            // testnet is being reset; no chain history to describe yet
+            /* nTime    */ 0,
+            /* nTxCount */ 0,
+            /* dTxRate  */ 0,
         };
     }
 };

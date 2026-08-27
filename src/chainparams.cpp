@@ -322,7 +322,7 @@ public:
         consensus.BIP66Height = 1251; // BIP66 activated on regtest (Used in functional tests)
         consensus.CSVHeight = 432; // CSV activated on regtest (Used in rpc activation tests)
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
-        consensus.MWEBHeight = 0; // MWEB always active on regtest
+        consensus.MWEBHeight = 432; // MWEB activates at height 432, matching upstream's BIP9 regtest activation (3 x 144-block window)
         consensus.TaprootHeight = 0; // Taproot always active on regtest
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAFixHeight = 600; // Regtest LWMAv2 activation height

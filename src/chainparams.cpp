@@ -87,6 +87,13 @@ public:
         consensus.nASERTHeight = 1246000; // ASERT activation height
         consensus.nASERTHalfLife = 3600; // 1 hour halflife for fast response
         consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty (equilibrium for ~1.3 MH/s)
+        // Difficulty-reset fork. The chain stalled at height 1359051: a 256-bit
+        // overflow in the ASERT shift produced nBits 0x01010000 (target 1), an
+        // unmineable block. Re-anchoring here restarts the ASERT schedule with
+        // zero accumulated debt, so the chain resumes at ~0.4 difficulty rather
+        // than sprinting through ~4,100 blocks at powLimit to repay 6.6 days.
+        consensus.nASERT2Height = 1359052;
+        consensus.nASERT2AnchorBits = 0x1d027ffd; // ~0.4 difficulty (~11 MH/s at 150 s)
         consensus.MinBIP9WarningHeight = 1252064; // SegwitHeight + nMinerConfirmationWindow 
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
@@ -218,6 +225,8 @@ public:
         consensus.nASERTHeight = 300; // Testnet ASERT activation height
         consensus.nASERTHalfLife = 3600; // 1 hour halflife
         consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty
+        consensus.nASERT2Height = 400; // Testnet difficulty-reset fork height
+        consensus.nASERT2AnchorBits = 0x1d027ffd; // ~0.4 difficulty
         consensus.MinBIP9WarningHeight = 0; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
@@ -321,6 +330,8 @@ public:
         consensus.nASERTHeight = 700; // Regtest ASERT activation height
         consensus.nASERTHalfLife = 3600; // 1 hour halflife
         consensus.nASERTAnchorBits = 0x1d18ffe7; // ~0.04 difficulty
+        consensus.nASERT2Height = 900; // Regtest difficulty-reset fork height
+        consensus.nASERT2AnchorBits = 0x1d027ffd; // ~0.4 difficulty
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days

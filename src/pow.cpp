@@ -263,62 +263,47 @@ unsigned int GetNextWorkRequiredLWMAv2(const CBlockIndex* pindexLast, const CBlo
 // - No window lag - responds to each block individually
 // - With constant hashrate, difficulty stays perfectly flat
 
-// Cached anchor block pointer (set once, never changes after activation)
+// Cached anchor block pointers (set once, never change after activation)
 static const CBlockIndex* g_asert_anchor = nullptr;
+static const CBlockIndex* g_asert2_anchor = nullptr;
 
 void ResetASERTAnchorCache()
 {
     g_asert_anchor = nullptr;
+    g_asert2_anchor = nullptr;
 }
 
-static const CBlockIndex* GetASERTAnchorBlock(const CBlockIndex* pindexLast, const Consensus::Params& params)
+static const CBlockIndex* GetAnchorBlock(const CBlockIndex* pindexLast, int anchorHeight, const CBlockIndex*& cache)
 {
     // Return cached anchor if available
-    const CBlockIndex* pindex = g_asert_anchor;
+    const CBlockIndex* pindex = cache;
     if (pindex)
         return pindex;
 
-    // Walk back to find the anchor block at nASERTHeight
+    // Walk back to find the anchor block at anchorHeight
     pindex = pindexLast;
-    while (pindex->nHeight > params.nASERTHeight) {
+    while (pindex->nHeight > anchorHeight) {
         pindex = pindex->pprev;
         assert(pindex);
     }
-    assert(pindex->nHeight == params.nASERTHeight);
+    assert(pindex->nHeight == anchorHeight);
 
     // Cache for future calls
-    g_asert_anchor = pindex;
+    cache = pindex;
     return pindex;
 }
 
-unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
+/**
+ * Shared ASERT core.
+ *
+ * Computes anchorTarget * 2^((timeDelta - T * heightDelta) / halflife), where
+ * timeDelta and heightDelta are measured from the anchor's schedule origin.
+ * Positive deviation means the chain is behind schedule and the target must
+ * rise (difficulty falls); negative means it is ahead and the target falls.
+ */
+static unsigned int ComputeASERT(const arith_uint256& anchorTarget, int64_t timeDelta, int64_t heightDelta, const Consensus::Params& params)
 {
-    assert(pindexLast);
-
     const arith_uint256 powLimit = UintToArith256(params.powLimit);
-
-    // Handle regtest no-retarget mode
-    if (params.fPowNoRetargeting)
-        return pindexLast->nBits;
-
-    // Find the anchor block and its parent
-    const CBlockIndex* pindexAnchor = GetASERTAnchorBlock(pindexLast, params);
-    assert(pindexAnchor->pprev);
-
-    // Anchor target: hardcoded to ~0.04 difficulty for equilibrium
-    arith_uint256 anchorTarget;
-    anchorTarget.SetCompact(params.nASERTAnchorBits);
-
-    // Time delta: current block's parent timestamp minus anchor's parent timestamp
-    // Using parent timestamps avoids manipulation of the current block's timestamp
-    const int64_t anchorParentTime = pindexAnchor->pprev->GetBlockTime();
-    const int64_t currentParentTime = pindexLast->GetBlockTime();
-    const int64_t timeDelta = currentParentTime - anchorParentTime;
-
-    // Height delta: height of block being computed minus anchor height
-    const int64_t nHeight = pindexLast->nHeight + 1;
-    const int64_t heightDelta = nHeight - params.nASERTHeight;
-
     const int64_t T = params.nPowTargetSpacing;
     const int64_t halfLife = params.nASERTHalfLife;
 
@@ -337,7 +322,7 @@ unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBloc
         frac = static_cast<uint16_t>(exponent & 0xFFFF);
     } else {
         // For negative exponents, ensure frac is in [0, 65536)
-        // Example: -2.3 → shifts = -3, frac = 0.7 * 65536
+        // Example: -2.3 -> shifts = -3, frac = 0.7 * 65536
         const int64_t absExponent = -exponent;
         shifts = -static_cast<int32_t>(absExponent >> 16);
         const uint16_t remainder = static_cast<uint16_t>(absExponent & 0xFFFF);
@@ -368,14 +353,39 @@ unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBloc
 
     // Apply integer shifts (left shift = easier, right shift = harder)
     if (shifts > 0) {
-        // Positive shifts: difficulty decreasing (target increasing)
-        // Clamp to avoid overflow past powLimit
+        // Positive shifts: difficulty decreasing (target increasing).
+        //
+        // arith_uint256::operator<<= silently DISCARDS every bit shifted past
+        // bit 255 - it has no overflow signal. A shift large enough to push the
+        // whole value out therefore wraps the target around to a tiny number,
+        // i.e. the *hardest* possible difficulty, when the mathematically
+        // correct answer is the easiest (powLimit). That inverted result bricks
+        // the chain: nBits becomes 0x01010000 (target == 1) and no block can
+        // ever be found again.
+        //
+        // The mainnet anchor target is 229 bits wide, so bits start falling off
+        // the top at a shift of 28 - far below the 256 the old guard checked
+        // for. Between 28 and 47 the truncated value happened to still exceed
+        // powLimit and was clamped correctly by luck; at 48 the whole (only
+        // 21-bit) mantissa clears bit 255, the value becomes 0, and the floor
+        // below turns it into target 1. A 48-hour lag behind the ASERT schedule
+        // was therefore enough to permanently brick the chain - which is what
+        // happened at height 1359051.
+        //
+        // Detect it the way the BCH aserti3-2d reference does: shift back and
+        // compare. If bits were lost the true value exceeds powLimit anyway, so
+        // clamping to powLimit is exactly equivalent to infinite precision.
         if (shifts >= 256) {
             return powLimit.GetCompact();
         }
-        nextTarget <<= shifts;
+        const arith_uint256 shifted = nextTarget << shifts;
+        if ((shifted >> shifts) != nextTarget) {
+            return powLimit.GetCompact();
+        }
+        nextTarget = shifted;
     } else if (shifts < 0) {
-        // Negative shifts: difficulty increasing (target decreasing)
+        // Negative shifts: difficulty increasing (target decreasing).
+        // Right shifts cannot overflow, they only saturate towards zero.
         const int32_t absShifts = -shifts;
         if (absShifts >= 256) {
             // Target would be essentially 0 - return maximum difficulty
@@ -395,12 +405,87 @@ unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBloc
     return nextTarget.GetCompact();
 }
 
+unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
+{
+    assert(pindexLast);
+
+    // Handle regtest no-retarget mode
+    if (params.fPowNoRetargeting)
+        return pindexLast->nBits;
+
+    // Find the anchor block and its parent
+    const CBlockIndex* pindexAnchor = GetAnchorBlock(pindexLast, params.nASERTHeight, g_asert_anchor);
+    assert(pindexAnchor->pprev);
+
+    // Anchor target: hardcoded to ~0.04 difficulty for equilibrium
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERTAnchorBits);
+
+    // Time delta: current block's parent timestamp minus anchor's parent timestamp
+    // Using parent timestamps avoids manipulation of the current block's timestamp
+    const int64_t timeDelta = pindexLast->GetBlockTime() - pindexAnchor->pprev->GetBlockTime();
+
+    // Height delta: height of block being computed minus anchor height
+    const int64_t heightDelta = (pindexLast->nHeight + 1) - params.nASERTHeight;
+
+    return ComputeASERT(anchorTarget, timeDelta, heightDelta, params);
+}
+
+/**
+ * ASERT against the second (difficulty-reset) anchor.
+ *
+ * The original anchor is left untouched so every block from nASERTHeight up to
+ * nASERT2Height keeps validating exactly as before - moving the first anchor
+ * would retroactively rewrite the difficulty of the entire existing chain.
+ *
+ * The schedule origin here is the anchor block's OWN timestamp rather than its
+ * parent's. That is the whole point of the reset: the stall left the chain 6.6
+ * days behind the original absolute schedule, and inheriting that debt would
+ * make ASERT correctly - but very expensively - repay it by emitting thousands
+ * of powLimit blocks. Starting the clock at the fork block zeroes the debt.
+ *
+ * A block at height h is on schedule when its timestamp equals
+ *     anchorTime + T * (h - nASERT2Height)
+ * so for the block being computed the deviation is measured against
+ *     heightDelta = nHeight - nASERT2Height - 1
+ * which makes the deviation exactly zero for the first block after the anchor.
+ */
+unsigned int GetNextWorkRequiredASERT2(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
+{
+    assert(pindexLast);
+
+    // Handle regtest no-retarget mode
+    if (params.fPowNoRetargeting)
+        return pindexLast->nBits;
+
+    const CBlockIndex* pindexAnchor = GetAnchorBlock(pindexLast, params.nASERT2Height, g_asert2_anchor);
+
+    arith_uint256 anchorTarget;
+    anchorTarget.SetCompact(params.nASERT2AnchorBits);
+
+    const int64_t timeDelta = pindexLast->GetBlockTime() - pindexAnchor->GetBlockTime();
+    const int64_t heightDelta = (pindexLast->nHeight + 1) - params.nASERT2Height - 1;
+
+    return ComputeASERT(anchorTarget, timeDelta, heightDelta, params);
+}
+
 // Main dispatch function - routes to appropriate algorithm based on block height
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
     assert(pindexLast != nullptr);
 
     int nHeight = pindexLast->nHeight + 1;
+
+    // The difficulty-reset fork block itself is mined at a fixed target. It is
+    // the anchor for the new schedule, so it cannot be derived from one.
+    if (nHeight == params.nASERT2Height && !params.fPowNoRetargeting) {
+        return params.nASERT2AnchorBits;
+    }
+
+    // Use the re-anchored ASERT schedule after the difficulty-reset fork
+    if (nHeight > params.nASERT2Height) {
+        return GetNextWorkRequiredASERT2(pindexLast, pblock, params);
+    }
 
     // Use ASERT algorithm after ASERT activation height
     if (nHeight > params.nASERTHeight) {

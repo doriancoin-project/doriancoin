@@ -368,12 +368,35 @@ unsigned int GetNextWorkRequiredASERT(const CBlockIndex* pindexLast, const CBloc
 
     // Apply integer shifts (left shift = easier, right shift = harder)
     if (shifts > 0) {
-        // Positive shifts: difficulty decreasing (target increasing)
-        // Clamp to avoid overflow past powLimit
+        // Positive shifts: difficulty decreasing (target increasing).
+        //
+        // arith_uint256::operator<<= silently DISCARDS every bit shifted past
+        // bit 255 - it has no overflow signal. A shift large enough to push the
+        // whole value out therefore wraps the target around to a tiny number,
+        // i.e. the *hardest* possible difficulty, when the mathematically
+        // correct answer is the easiest (powLimit). That inverted result bricks
+        // the chain: nBits becomes 0x01010000 (target == 1) and no block can
+        // ever be found again.
+        //
+        // The mainnet anchor target is 229 bits wide, so bits start falling off
+        // the top at a shift of 28 - far below the 256 the old guard checked
+        // for. Between 28 and 47 the truncated value happened to still exceed
+        // powLimit and was clamped correctly by luck; at 48 the whole (only
+        // 21-bit) mantissa clears bit 255, the value becomes 0, and the floor
+        // below turns it into target 1. A 48-hour lag behind the ASERT schedule
+        // was therefore enough to permanently brick the chain.
+        //
+        // Detect it the way the BCH aserti3-2d reference does: shift back and
+        // compare. If bits were lost the true value exceeds powLimit anyway, so
+        // clamping to powLimit is exactly equivalent to infinite precision.
         if (shifts >= 256) {
             return powLimit.GetCompact();
         }
-        nextTarget <<= shifts;
+        const arith_uint256 shifted = nextTarget << shifts;
+        if ((shifted >> shifts) != nextTarget) {
+            return powLimit.GetCompact();
+        }
+        nextTarget = shifted;
     } else if (shifts < 0) {
         // Negative shifts: difficulty increasing (target decreasing)
         const int32_t absShifts = -shifts;

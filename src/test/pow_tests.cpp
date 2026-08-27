@@ -694,7 +694,144 @@ BOOST_AUTO_TEST_CASE(asert_powlimit_clamp)
     resultTarget.SetCompact(result);
     arith_uint256 powLimit = UintToArith256(params.powLimit);
 
-    BOOST_CHECK(resultTarget <= powLimit);
+    // Must be EXACTLY powLimit. Checking only "<= powLimit" is vacuous: the
+    // overflow bug produced target == 1 (the hardest possible difficulty),
+    // which also satisfies <=, so this test passed while the chain bricked.
+    // Compare in compact form: powLimit has 236 significant bits but nBits keeps
+    // only a 24-bit mantissa, so SetCompact(powLimit.GetCompact()) != powLimit.
+    BOOST_CHECK_EQUAL(resultTarget.GetCompact(), powLimit.GetCompact());
+
+    ResetASERTAnchorCache();
+}
+
+/* Regression test for the mainnet stall at height 1359051.
+
+   Block 1359051 arrived ~7.2 days after its parent, leaving the chain 573873
+   seconds (6.6 days) BEHIND the absolute ASERT schedule:
+
+       anchor parent (1245999) time = 1769808705
+       tip           (1359051) time = 1787340378
+       timeDelta                    = 17531673
+       heightDelta  = 1359052 - 1246000 = 113052, ideal = 113052*150 = 16957800
+       deviation    = 17531673 - 16957800 = +573873   (behind -> target easier)
+       exponent     = 573873 * 65536 / 3600, shifts = +159
+
+   The correct response is the easiest possible target (powLimit). Before the
+   overflow guard, shifting the 230-bit target left by 159 pushed every set bit
+   past bit 255; arith_uint256 truncated it to zero, and the "at least 1" floor
+   turned that into target == 1 / nBits == 0x01010000 - an unmineable chain.
+
+   Only the deviation drives the exponent, so the mainnet arithmetic is
+   reproduced here over a short chain rather than 113k block indices. */
+BOOST_AUTO_TEST_CASE(asert_long_stall_does_not_overflow_to_max_difficulty)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    // Guard the real mainnet consensus values this test is calibrated against.
+    BOOST_CHECK_EQUAL(params.nASERTHalfLife, 3600);
+    BOOST_CHECK_EQUAL(params.nASERTAnchorBits, 0x1d18ffe7U);
+    BOOST_CHECK_EQUAL(params.nPowTargetSpacing, 150);
+
+    params.nASERTHeight = 200;
+
+    ResetASERTAnchorCache();
+
+    const int64_t kMainnetDeviation = 573873; // seconds behind schedule
+    const int64_t heightDelta = 11;           // tip is anchor+10
+
+    std::vector<CBlockIndex> blocks(12);
+    blocks[0].pprev = nullptr;
+    blocks[0].nHeight = params.nASERTHeight - 1; // anchor's parent
+    blocks[0].nTime = 1769808705;               // real mainnet timestamp
+    blocks[0].nBits = params.nASERTAnchorBits;
+
+    for (size_t i = 1; i < blocks.size(); i++) {
+        blocks[i].pprev = &blocks[i - 1];
+        blocks[i].nHeight = params.nASERTHeight + int(i) - 1;
+        blocks[i].nTime = blocks[0].nTime + int64_t(i) * params.nPowTargetSpacing;
+        blocks[i].nBits = params.nASERTAnchorBits;
+    }
+
+    // Tip is heightDelta-1 blocks past the anchor; place its timestamp so the
+    // schedule deviation matches mainnet exactly.
+    CBlockIndex& tip = blocks.back();
+    BOOST_CHECK_EQUAL(tip.nHeight + 1 - params.nASERTHeight, heightDelta);
+    tip.nTime = blocks[0].nTime + params.nPowTargetSpacing * heightDelta + kMainnetDeviation;
+
+    const int64_t deviation =
+        (tip.nTime - blocks[0].nTime) - params.nPowTargetSpacing * heightDelta;
+    BOOST_CHECK_EQUAL(deviation, kMainnetDeviation);
+    BOOST_CHECK_EQUAL((deviation * 65536) / params.nASERTHalfLife >> 16, 159);
+
+    CBlockHeader header;
+    header.nTime = tip.nTime + params.nPowTargetSpacing;
+
+    const unsigned int result = GetNextWorkRequiredASERT(&tip, &header, params);
+
+    arith_uint256 resultTarget;
+    resultTarget.SetCompact(result);
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+
+    // The chain is far behind schedule: the target must be the easiest allowed,
+    // never the hardest.
+    BOOST_CHECK_MESSAGE(result != 0x01010000U,
+                        "ASERT returned target == 1 (unmineable) for a chain behind schedule");
+    BOOST_CHECK_EQUAL(result, powLimit.GetCompact());
+
+    ResetASERTAnchorCache();
+}
+
+/* Sweep every integer shift and assert the target never inverts: a chain that
+   is further behind schedule must never receive a harder target. */
+BOOST_AUTO_TEST_CASE(asert_target_is_monotonic_in_lateness)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::MAIN);
+    Consensus::Params params = chainParams->GetConsensus();
+
+    params.nASERTHeight = 200;
+    params.nASERTHalfLife = 3600;
+    params.nASERTAnchorBits = 0x1d18ffe7;
+
+    const arith_uint256 powLimit = UintToArith256(params.powLimit);
+
+    arith_uint256 prevTarget(0);
+
+    // Walk lateness from 0 up to ~40 days past schedule, well beyond the point
+    // where the old code overflowed (shifts >= 27, i.e. ~27 hours late).
+    for (int64_t lateHours = 0; lateHours <= 24 * 40; lateHours += 3) {
+        ResetASERTAnchorCache();
+
+        std::vector<CBlockIndex> blocks(2);
+        blocks[0].pprev = nullptr;
+        blocks[0].nHeight = params.nASERTHeight - 1;
+        blocks[0].nTime = 1000000000;
+        blocks[0].nBits = params.nASERTAnchorBits;
+
+        blocks[1].pprev = &blocks[0];
+        blocks[1].nHeight = params.nASERTHeight;
+        // heightDelta for the next block is 1, ideal timespan is T.
+        blocks[1].nTime = blocks[0].nTime + params.nPowTargetSpacing + lateHours * 3600;
+        blocks[1].nBits = params.nASERTAnchorBits;
+
+        CBlockHeader header;
+        header.nTime = blocks[1].nTime + params.nPowTargetSpacing;
+
+        unsigned int bits = GetNextWorkRequiredASERT(&blocks[1], &header, params);
+        arith_uint256 target;
+        target.SetCompact(bits);
+
+        BOOST_CHECK_MESSAGE(target >= prevTarget,
+                            "target got HARDER as the chain fell further behind, at lateHours="
+                                << lateHours);
+        BOOST_CHECK_MESSAGE(target > arith_uint256(1),
+                            "target collapsed to 1 at lateHours=" << lateHours);
+        BOOST_CHECK(target <= powLimit);
+        prevTarget = target;
+    }
+
+    // Far past schedule it must sit at powLimit (compact form), not wrap.
+    BOOST_CHECK_EQUAL(prevTarget.GetCompact(), powLimit.GetCompact());
 
     ResetASERTAnchorCache();
 }

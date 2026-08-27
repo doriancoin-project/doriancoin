@@ -18,14 +18,15 @@ import random
 from segwit_addr import bech32_encode, decode_segwit_address, convertbits, CHARSET, Encoding
 
 # key types
-PUBKEY_ADDRESS = 48
+PUBKEY_ADDRESS = 30
 SCRIPT_ADDRESS = 5
-SCRIPT_ADDRESS2 = 50
-PUBKEY_ADDRESS_TEST = 111
-SCRIPT_ADDRESS_TEST = 196
+SCRIPT_ADDRESS2 = 28
+PUBKEY_ADDRESS_TEST = 30
+SCRIPT_ADDRESS_TEST = 22
 SCRIPT_ADDRESS_TEST2 = 58
 PUBKEY_ADDRESS_REGTEST = 111
 SCRIPT_ADDRESS_REGTEST = 196
+SCRIPT_ADDRESS_REGTEST2 = 58
 PRIVKEY = 176
 PRIVKEY_TEST = 239
 PRIVKEY_REGTEST = 239
@@ -52,26 +53,27 @@ p2tr_prefix = (OP_1, 32)
 metadata_keys = ['isPrivkey', 'chain', 'isCompressed', 'tryCaseFlip']
 # templates for valid sequences
 templates = [
-  # prefix, payload_size, suffix, metadata, output_prefix, output_suffix
+  # prefix, payload_size, suffix, metadata, output_prefix, output_suffix, canonical
   #                                  None = N/A
-  ((PUBKEY_ADDRESS,),         20, (),   (False, 'main',    None,  None), pubkey_prefix, pubkey_suffix),
-  ((SCRIPT_ADDRESS,),         20, (),   (False, 'main',    None,  None), script_prefix, script_suffix),
-  ((SCRIPT_ADDRESS2,),        20, (),   (False, 'main',    None,  None), script_prefix, script_suffix),
-  ((PUBKEY_ADDRESS_TEST,),    20, (),   (False, 'test',    None,  None), pubkey_prefix, pubkey_suffix),
-  ((SCRIPT_ADDRESS_TEST,),    20, (),   (False, 'test',    None,  None), script_prefix, script_suffix),
-  ((SCRIPT_ADDRESS_TEST2,),   20, (),   (False, 'test',    None,  None), script_prefix, script_suffix),
-  ((PUBKEY_ADDRESS_TEST,),    20, (),   (False, 'signet',  None,  None), pubkey_prefix, pubkey_suffix),
-  ((SCRIPT_ADDRESS_TEST,),    20, (),   (False, 'signet',  None,  None), script_prefix, script_suffix),
-  ((PUBKEY_ADDRESS_REGTEST,), 20, (),   (False, 'regtest', None,  None), pubkey_prefix, pubkey_suffix),
-  ((SCRIPT_ADDRESS_REGTEST,), 20, (),   (False, 'regtest', None,  None), script_prefix, script_suffix),
-  ((PRIVKEY,),                32, (),   (True,  'main',    False, None), (),            ()),
-  ((PRIVKEY,),                32, (1,), (True,  'main',    True,  None), (),            ()),
-  ((PRIVKEY_TEST,),           32, (),   (True,  'test',    False, None), (),            ()),
-  ((PRIVKEY_TEST,),           32, (1,), (True,  'test',    True,  None), (),            ()),
-  ((PRIVKEY_TEST,),           32, (),   (True,  'signet',  False, None), (),            ()),
-  ((PRIVKEY_TEST,),           32, (1,), (True,  'signet',  True,  None), (),            ()),
-  ((PRIVKEY_REGTEST,),        32, (),   (True,  'regtest', False, None), (),            ()),
-  ((PRIVKEY_REGTEST,),        32, (1,), (True,  'regtest', True,  None), (),            ())
+  # 'canonical' marks the encoding EncodeDestination() actually produces. The
+  # legacy SCRIPT_ADDRESS prefixes still decode, so they belong in is_valid(),
+  # but emitting them as valid vectors would break key_io_valid_gen, which
+  # re-encodes each script and compares against the vector.
+  ((PUBKEY_ADDRESS,),          20, (),   (False, 'main',    None,  None), pubkey_prefix, pubkey_suffix, True),
+  ((SCRIPT_ADDRESS,),          20, (),   (False, 'main',    None,  None), script_prefix, script_suffix, False),
+  ((SCRIPT_ADDRESS2,),         20, (),   (False, 'main',    None,  None), script_prefix, script_suffix, True),
+  ((PUBKEY_ADDRESS_TEST,),     20, (),   (False, 'test',    None,  None), pubkey_prefix, pubkey_suffix, True),
+  ((SCRIPT_ADDRESS_TEST,),     20, (),   (False, 'test',    None,  None), script_prefix, script_suffix, False),
+  ((SCRIPT_ADDRESS_TEST2,),    20, (),   (False, 'test',    None,  None), script_prefix, script_suffix, True),
+  ((PUBKEY_ADDRESS_REGTEST,),  20, (),   (False, 'regtest', None,  None), pubkey_prefix, pubkey_suffix, True),
+  ((SCRIPT_ADDRESS_REGTEST,),  20, (),   (False, 'regtest', None,  None), script_prefix, script_suffix, False),
+  ((SCRIPT_ADDRESS_REGTEST2,), 20, (),   (False, 'regtest', None,  None), script_prefix, script_suffix, True),
+  ((PRIVKEY,),                 32, (),   (True,  'main',    False, None), (),            (),            True),
+  ((PRIVKEY,),                 32, (1,), (True,  'main',    True,  None), (),            (),            True),
+  ((PRIVKEY_TEST,),            32, (),   (True,  'test',    False, None), (),            (),            True),
+  ((PRIVKEY_TEST,),            32, (1,), (True,  'test',    True,  None), (),            (),            True),
+  ((PRIVKEY_REGTEST,),         32, (),   (True,  'regtest', False, None), (),            (),            True),
+  ((PRIVKEY_REGTEST,),         32, (1,), (True,  'regtest', True,  None), (),            (),            True)
 ]
 # templates for valid bech32 sequences
 bech32_templates = [
@@ -84,10 +86,6 @@ bech32_templates = [
   ('tdsv',    0, 32, (False, 'test',    None, True), Encoding.BECH32,  p2wsh_prefix),
   ('tdsv',    1, 32, (False, 'test',    None, True), Encoding.BECH32M, p2tr_prefix),
   ('tdsv',    3, 16, (False, 'test',    None, True), Encoding.BECH32M, (OP_3, 16)),
-  ('tdsv',    0, 20, (False, 'signet',  None, True), Encoding.BECH32,  p2wpkh_prefix),
-  ('tdsv',    0, 32, (False, 'signet',  None, True), Encoding.BECH32,  p2wsh_prefix),
-  ('tdsv',    1, 32, (False, 'signet',  None, True), Encoding.BECH32M, p2tr_prefix),
-  ('tdsv',    3, 32, (False, 'signet',  None, True), Encoding.BECH32M, (OP_3, 32)),
   ('rdsv',  0, 20, (False, 'regtest', None, True), Encoding.BECH32,  p2wpkh_prefix),
   ('rdsv',  0, 32, (False, 'regtest', None, True), Encoding.BECH32,  p2wsh_prefix),
   ('rdsv',  1, 32, (False, 'regtest', None, True), Encoding.BECH32M, p2tr_prefix),
@@ -159,7 +157,7 @@ def gen_valid_bech32_vector(template):
 def gen_valid_vectors():
     '''Generate valid test vectors'''
     glist = [gen_valid_base58_vector, gen_valid_bech32_vector]
-    tlist = [templates, bech32_templates]
+    tlist = [[t for t in templates if t[6]], bech32_templates]
     while True:
         for template, valid_vector_generator in [(t, g) for g, l in zip(glist, tlist) for t in l]:
             rv, payload = valid_vector_generator(template)

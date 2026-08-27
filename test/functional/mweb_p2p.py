@@ -156,7 +156,9 @@ class MWEBP2PTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def assert_mweb_header(self, node, light_client, post_mweb_block_hash):
         assert post_mweb_block_hash in light_client.merkle_blocks_with_mweb
         merkle_block_with_mweb = light_client.merkle_blocks_with_mweb[post_mweb_block_hash]

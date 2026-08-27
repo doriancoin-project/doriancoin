@@ -150,7 +150,8 @@ class BlockchainTest(BitcoinTestFramework):
                 'active': False
             },
             'taproot': {'type': 'buried', 'active': True, 'height': 0},
-            'mweb': {'type': 'buried', 'active': False, 'height': 432},
+            # mweb is a buried deployment disabled on regtest by default (see -mwebheight),
+            # and BuriedForkDescPushBack hides deployments set to INT_MAX.
         })
 
     def _test_getchaintxstats(self):

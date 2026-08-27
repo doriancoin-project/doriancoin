@@ -5,7 +5,7 @@
 """Basic MWEB Wallet test"""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.dsv_util import setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, setup_mweb_chain
 from test_framework.util import assert_equal
 
 class MWEBWalletBasicTest(BitcoinTestFramework):
@@ -13,7 +13,9 @@ class MWEBWalletBasicTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 3
         self.extra_args = [['-whitelist=noban@127.0.0.1'],['-whitelist=noban@127.0.0.1'],[]]  # immediate tx relay
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 
@@ -67,7 +69,7 @@ class MWEBWalletBasicTest(BitcoinTestFramework):
         assert n0_tx1['fee'] < 0 and n0_tx1['fee'] > -0.1
 
         self.log.info("Restart node1 with wallet broadcast disabled")
-        self.restart_node(1, ['-whitelist=noban@127.0.0.1', '-walletbroadcast=0'])
+        self.restart_node(1, ['-whitelist=noban@127.0.0.1', '-walletbroadcast=0', '-mwebheight={}'.format(FIRST_MWEB_HEIGHT)])
         node1 = self.nodes[1]
         self.connect_nodes(0, 1)
         self.connect_nodes(1, 2)

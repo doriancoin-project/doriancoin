@@ -7,6 +7,7 @@
 from decimal import Decimal
 
 from test_framework.test_framework import BitcoinTestFramework
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT
 from test_framework.util import assert_equal
 
 class MWEBWeightTest(BitcoinTestFramework):
@@ -15,7 +16,9 @@ class MWEBWeightTest(BitcoinTestFramework):
         self.rpc_timeout = 120
         self.num_nodes = 3
         self.extra_args = [["-spendzeroconfchange=0"]] * self.num_nodes
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 

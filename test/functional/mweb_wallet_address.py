@@ -23,6 +23,7 @@ import os
 import shutil
 
 from test_framework.test_framework import BitcoinTestFramework
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT
 from test_framework.descriptors import descsum_create
 
 from test_framework.util import (
@@ -40,7 +41,9 @@ class MWEBWalletAddressTest(BitcoinTestFramework):
             ["-usehd=0"], # v0.15.1
         ]
         self.wallet_names = [self.default_wallet_name, None]
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
         self.skip_if_no_previous_releases()

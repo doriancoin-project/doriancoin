@@ -8,7 +8,7 @@ import errno
 import http.client
 from decimal import Decimal
 
-from test_framework.dsv_util import setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, setup_mweb_chain
 from test_framework.messages import CBlock, FromHex
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
@@ -20,7 +20,9 @@ class MWEBDBCrashTest(BitcoinTestFramework):
         self.num_nodes = 1
         self.rpc_timeout = 120
         self.supports_cli = False
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 
@@ -59,7 +61,7 @@ class MWEBDBCrashTest(BitcoinTestFramework):
         clean_tip = node.getbestblockhash()
 
         self.log.info("Restart with deterministic db crash simulation")
-        self.restart_node(0, extra_args=["-dbbatchsize=1", "-dbcrashratio=1"])
+        self.restart_node(0, extra_args=["-dbbatchsize=1", "-dbcrashratio=1", "-mwebheight={}".format(FIRST_MWEB_HEIGHT)])
         node = self.nodes[0]
         miner = node.get_wallet_rpc(self.default_wallet_name)
         funder = node.get_wallet_rpc("funder")
@@ -79,7 +81,7 @@ class MWEBDBCrashTest(BitcoinTestFramework):
         self.assert_flush_crashes(node)
 
         self.log.info("Restart and verify replay rolls MWEB state forward with the core UTXO set")
-        self.start_node(0, extra_args=["-dbbatchsize=1"])
+        self.start_node(0, extra_args=["-dbbatchsize=1", "-mwebheight={}".format(FIRST_MWEB_HEIGHT)])
         node = self.nodes[0]
         miner = node.get_wallet_rpc(self.default_wallet_name)
         spender = node.get_wallet_rpc("spender")

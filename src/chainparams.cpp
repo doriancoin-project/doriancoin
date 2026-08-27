@@ -5,6 +5,8 @@
 
 #include <chainparams.h>
 
+#include <limits>
+
 #include <chainparamsseeds.h>
 #include <consensus/merkle.h>
 #include <hash.h> // for signet block challenge hash
@@ -321,7 +323,11 @@ public:
         consensus.BIP66Height = 1251; // BIP66 activated on regtest (Used in functional tests)
         consensus.CSVHeight = 432; // CSV activated on regtest (Used in rpc activation tests)
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
-        consensus.MWEBHeight = 432; // MWEB activates at height 432, matching upstream's BIP9 regtest activation (3 x 144-block window)
+        // Upstream gates MWEB behind a BIP9 deployment, so it stays inactive on regtest
+        // unless blocks signal for it. As a buried deployment we get no such gate, and
+        // any test that hand-builds blocks past the activation height would be forced to
+        // produce MWEB blocks. Keep it off by default; MWEB tests opt in with -mwebheight.
+        consensus.MWEBHeight = std::numeric_limits<int>::max();
         consensus.TaprootHeight = 0; // Taproot always active on regtest
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAFixHeight = 600; // Regtest LWMAv2 activation height
@@ -428,6 +434,21 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
             height = std::numeric_limits<int>::max();
         }
         consensus.SegwitHeight = static_cast<int>(height);
+    }
+
+    if (args.IsArgSet("-mwebheight")) {
+        int64_t height = args.GetArg("-mwebheight", consensus.MWEBHeight);
+        if (height < -1 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Activation height %ld for MWEB is out of valid range. Use -1 to disable MWEB.", height));
+        } else if (height == -1) {
+            LogPrintf("MWEB disabled for testing\n");
+            height = std::numeric_limits<int>::max();
+        } else if (height == 0) {
+            // IsMWEBEnabled() treats a null pindexPrev as height 0, so MWEBHeight == 0 makes
+            // is_first_hogex never true and every HogEx is required to spend a previous one.
+            throw std::runtime_error("Activation height 0 for MWEB is not supported. Use -1 to disable MWEB.");
+        }
+        consensus.MWEBHeight = static_cast<int>(height);
     }
 
     if (!args.IsArgSet("-vbparams")) return;

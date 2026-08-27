@@ -6,7 +6,7 @@
 
 import copy
 
-from test_framework.dsv_util import setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, setup_mweb_chain
 from test_framework.messages import (
     BlockTransactions,
     CBlock,
@@ -49,7 +49,9 @@ class MWEBP2PMutatedCompactBlockTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 

@@ -149,17 +149,8 @@ class BlockchainTest(BitcoinTestFramework):
                 },
                 'active': False
             },
-            'taproot': {
-                'type': 'bip9',
-                'bip9': {
-                    'status': 'active',
-                    'start_time': -1,
-                    'timeout': 9223372036854775807,
-                    'since': 0,
-                },
-                'height': 0,
-                'active': True
-            }
+            'taproot': {'type': 'buried', 'active': True, 'height': 0},
+            'mweb': {'type': 'buried', 'active': False, 'height': 432},
         })
 
     def _test_getchaintxstats(self):

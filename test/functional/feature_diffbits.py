@@ -2,11 +2,16 @@
 # Copyright (c) 2024 The Doriancoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test LWMA difficulty adjustment algorithm activation.
+"""Test difficulty bits enforcement across the LWMA activation height.
 
-Tests that the LWMA (Linear Weighted Moving Average) difficulty algorithm
-activates correctly at the specified height and that blocks with incorrect
-difficulty are rejected.
+Mines past the regtest LWMA activation height (nLWMAHeight = 500) to confirm
+block production is unaffected by the algorithm switch, then checks that a block
+whose nBits differ from the required value is rejected as bad-diffbits.
+
+This does NOT verify the LWMA algorithm itself. Regtest sets
+fPowNoRetargeting = true, so the required difficulty never moves and both
+algorithms return powLimit. Real LWMA coverage needs regtest parameters that
+actually retarget.
 """
 
 from test_framework.blocktools import (
@@ -19,7 +24,7 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
 
 
-class LWMAActivationTest(BitcoinTestFramework):
+class DiffBitsTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
@@ -96,8 +101,12 @@ class LWMAActivationTest(BitcoinTestFramework):
         block.nVersion = tmpl["version"]
         block.hashPrevBlock = int(tmpl["previousblockhash"], 16)
         block.nTime = tmpl["curtime"]
-        # Use incorrect difficulty bits
-        block.nBits = 0x207fffff  # Very easy difficulty, definitely wrong
+        # Use incorrect difficulty bits. 0x207fffff is regtest's powLimit and is
+        # exactly what the node requires here, so submitting it would produce a
+        # perfectly valid block. Use a marginally harder target instead: it
+        # differs from the required bits but is still trivial to solve.
+        assert_equal(tmpl["bits"], "207fffff")
+        block.nBits = 0x207ffffe
         block.nNonce = 0
         block.vtx = [coinbase_tx]
         block.hashMerkleRoot = block.calc_merkle_root()
@@ -112,8 +121,8 @@ class LWMAActivationTest(BitcoinTestFramework):
         info = node.getblockchaininfo()
         assert_equal(info['blocks'], activation_height + 50)
 
-        self.log.info("LWMA activation test passed!")
+        self.log.info("Difficulty bits enforcement test passed!")
 
 
 if __name__ == '__main__':
-    LWMAActivationTest().main()
+    DiffBitsTest().main()

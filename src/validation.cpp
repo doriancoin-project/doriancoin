@@ -3714,8 +3714,23 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
         }
     }
 
-    // Enforce rule that the coinbase starts with serialized block height
-    if (nHeight >= consensusParams.BIP34Height)
+    // Enforce rule that the coinbase starts with serialized block height.
+    //
+    // Genesis is exempt. nHeight is 0 only when pindexPrev is null, which is only
+    // ever the genesis block, and its coinbase carries the pszTimestamp rather than
+    // a height push. BIP34Height is 0 on mainnet and testnet here, so without this
+    // exemption genesis fails "bad-cb-height". Normal startup never notices, because
+    // LoadGenesisBlock() installs genesis via AddToBlockIndex() without contextual
+    // checks -- but -reindex feeds every block on disk back through AcceptBlock(),
+    // where genesis was rejected and took the rest of the chain with it
+    // ("AcceptBlockHeader: prev block invalid"), leaving the node stuck at height 0.
+    //
+    // Genesis is pinned by the hashGenesisBlock assertion in chainparams, so skipping
+    // this check for it cannot admit any other block. Note this deliberately does not
+    // raise BIP34Height: that value is also compared against BIP34Hash to decide
+    // whether BIP30 is enforced, so changing it would silently turn BIP30 on for the
+    // entire existing chain.
+    if (nHeight > 0 && nHeight >= consensusParams.BIP34Height)
     {
         CScript expect = CScript() << nHeight;
         if (block.vtx[0]->vin[0].scriptSig.size() < expect.size() ||

@@ -9,7 +9,7 @@ from test_framework.blocktools import (
     add_witness_commitment,
     create_coinbase,
 )
-from test_framework.ltc_util import create_hogex, setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, create_hogex, setup_mweb_chain
 from test_framework.messages import (
     COIN,
     CBlock,
@@ -33,6 +33,8 @@ class MWEBDuplicatePeginTest(BitcoinTestFramework):
         self.num_nodes = 1
         self.setup_clean_chain = True
         self.supports_cli = False
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        self.extra_args = [["-mwebheight={}".format(FIRST_MWEB_HEIGHT)]]
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -140,7 +142,7 @@ class MWEBDuplicatePeginTest(BitcoinTestFramework):
         self.log.info("Activate MWEB")
         setup_mweb_chain(node)
 
-        self.log.info("Create an LTC-only pegin source with one small confirmed coin")
+        self.log.info("Create a DSV-only pegin source with one small confirmed coin")
         node.createwallet(wallet_name="pegin_source")
         pegin_source = node.get_wallet_rpc("pegin_source")
         miner.sendtoaddress(pegin_source.getnewaddress(address_type="legacy"), 3)

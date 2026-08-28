@@ -149,17 +149,9 @@ class BlockchainTest(BitcoinTestFramework):
                 },
                 'active': False
             },
-            'taproot': {
-                'type': 'bip9',
-                'bip9': {
-                    'status': 'active',
-                    'start_time': -1,
-                    'timeout': 9223372036854775807,
-                    'since': 0,
-                },
-                'height': 0,
-                'active': True
-            }
+            'taproot': {'type': 'buried', 'active': True, 'height': 0},
+            # mweb is a buried deployment disabled on regtest by default (see -mwebheight),
+            # and BuriedForkDescPushBack hides deployments set to INT_MAX.
         })
 
     def _test_getchaintxstats(self):

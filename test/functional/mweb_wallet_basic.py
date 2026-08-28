@@ -5,7 +5,7 @@
 """Basic MWEB Wallet test"""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.dsv_util import setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, setup_mweb_chain
 from test_framework.util import assert_equal
 
 class MWEBWalletBasicTest(BitcoinTestFramework):
@@ -13,7 +13,9 @@ class MWEBWalletBasicTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 3
         self.extra_args = [['-whitelist=noban@127.0.0.1'],['-whitelist=noban@127.0.0.1'],[]]  # immediate tx relay
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 
@@ -66,12 +68,25 @@ class MWEBWalletBasicTest(BitcoinTestFramework):
         assert n0_tx1['amount'] == -25
         assert n0_tx1['fee'] < 0 and n0_tx1['fee'] > -0.1
 
+        self.log.info("Restart node1 with wallet broadcast disabled")
+        self.restart_node(1, ['-whitelist=noban@127.0.0.1', '-walletbroadcast=0', '-mwebheight={}'.format(FIRST_MWEB_HEIGHT)])
+        node1 = self.nodes[1]
+        self.connect_nodes(0, 1)
+        self.connect_nodes(1, 2)
+        self.sync_all()
+
         #
         # Pegout to node2
         #
-        self.log.info("Send (pegout) to node2 bech32 address")
+        self.log.info("Create a pegout and relay it with maxfeerate=0")
         n2_addr = node2.getnewaddress(address_type='bech32')
-        tx2_id = node1.sendtoaddress(n2_addr, 15)
+        tx2_id = node1.sendtoaddress(address=n2_addr, amount=15, fee_rate=10)
+        tx2_hex = node1.gettransaction(txid=tx2_id)['hex']
+        assert tx2_id not in node1.getrawmempool()
+        tx2_accept = node1.testmempoolaccept([tx2_hex], 0)[0]
+        assert_equal(tx2_accept['txid'], tx2_id)
+        assert_equal(tx2_accept['allowed'], True)
+        assert_equal(node1.sendrawtransaction(tx2_hex, 0), tx2_id)
         self.sync_mempools()
 
         self.log.info("Verify node1's wallet lists the transactions as spent")
@@ -89,9 +104,15 @@ class MWEBWalletBasicTest(BitcoinTestFramework):
         #
         # Pegout to node2 using subtract fee from amount
         #
-        self.log.info("Send (pegout) to node2 bech32 address")
+        self.log.info("Create a subtract-fee pegout and relay it with maxfeerate=0")
         n2_addr2 = node2.getnewaddress(address_type='bech32')
         tx3_id = node1.sendtoaddress(address=n2_addr2, amount=5, subtractfeefromamount=True)
+        tx3_hex = node1.gettransaction(txid=tx3_id)['hex']
+        assert tx3_id not in node1.getrawmempool()
+        tx3_accept = node1.testmempoolaccept([tx3_hex], 0)[0]
+        assert_equal(tx3_accept['txid'], tx3_id)
+        assert_equal(tx3_accept['allowed'], True)
+        assert_equal(node1.sendrawtransaction(tx3_hex, 0), tx3_id)
         self.sync_mempools()
         
         n1_tx3 = node1.gettransaction(txid=tx3_id)

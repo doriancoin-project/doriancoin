@@ -7,6 +7,7 @@
 from decimal import Decimal
 
 from test_framework.test_framework import BitcoinTestFramework
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT
 from test_framework.util import assert_equal
 
 class MWEBWeightTest(BitcoinTestFramework):
@@ -15,13 +16,15 @@ class MWEBWeightTest(BitcoinTestFramework):
         self.rpc_timeout = 120
         self.num_nodes = 3
         self.extra_args = [["-spendzeroconfchange=0"]] * self.num_nodes
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 
     def run_test(self):
         self.log.info("Create some blocks")
-        self.nodes[0].generate(101)
+        self.nodes[0].generate(431)
 
         self.log.info("Pegin some coins - activate MWEB")
         addr = self.nodes[0].getnewaddress(address_type='mweb')
@@ -37,8 +40,8 @@ class MWEBWeightTest(BitcoinTestFramework):
         self.nodes[2].generate(700)
         self.sync_all()
 
-        # Max number of MWEB transactions in a block (21000/39)
-        tx_limit = 538
+        # Max number of MWEB transactions in a block (20000/39)
+        tx_limit = 512
 
         self.log.info("Create transactions up to the max block weight")
         addr = self.nodes[0].getnewaddress(address_type='mweb')

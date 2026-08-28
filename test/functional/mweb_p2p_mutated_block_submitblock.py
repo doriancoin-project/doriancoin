@@ -6,7 +6,7 @@
 
 import copy
 
-from test_framework.ltc_util import setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, setup_mweb_chain
 from test_framework.messages import CBlock, FromHex, msg_block
 from test_framework.p2p import P2PDataStore
 from test_framework.test_framework import BitcoinTestFramework
@@ -23,7 +23,9 @@ class MWEBP2PMutatedBlockSubmitBlockTest(BitcoinTestFramework):
             ['-whitelist=noban@127.0.0.1'],
         ]
         self.supports_cli = False
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 

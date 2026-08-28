@@ -9,6 +9,7 @@
 #include <chainparams.h>
 #include <net.h>
 #include <net_processing.h>
+#include <policy/policy.h>
 #include <pubkey.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
@@ -409,7 +410,10 @@ BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
         tx.vout.resize(1);
         tx.vout[0].nValue = 1*CENT;
         tx.vout[0].scriptPubKey = GetScriptForDestination(PKHash(key.GetPubKey()));
-        tx.vin.resize(2777);
+        // Enough inputs to exceed MAX_STANDARD_TX_WEIGHT. Each signed P2PKH input
+        // serializes to ~148 bytes (~592 weight), so dividing the limit by a
+        // conservative 500 keeps this oversized if the limit changes again.
+        tx.vin.resize(MAX_STANDARD_TX_WEIGHT / 500);
         for (unsigned int j = 0; j < tx.vin.size(); j++)
         {
             tx.vin[j].prevout.n = j;

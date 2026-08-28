@@ -1323,7 +1323,9 @@ class SegWitTest(BitcoinTestFramework):
         # Add too-large for IsStandard witness and check that it does not enter reject filter
         p2sh_program = CScript([OP_TRUE])
         p2sh_pubkey = hash160(p2sh_program)
-        witness_program2 = CScript([b'a' * 400000])
+        # Must exceed MAX_STANDARD_TX_WEIGHT, which is 2180000 here rather than
+        # Bitcoin's 400000. Witness bytes count once toward weight.
+        witness_program2 = CScript([b'a' * 2200000])
         tx3.vout.append(CTxOut(tx2.vout[0].nValue - 1000, CScript([OP_HASH160, p2sh_pubkey, OP_EQUAL])))
         tx3.wit.vtxinwit[0].scriptWitness.stack = [witness_program2]
         tx3.rehash()

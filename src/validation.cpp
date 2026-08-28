@@ -23,6 +23,7 @@
 #include <mw/node/CoinsView.h>
 #include <mweb/mweb_db.h>
 #include <mweb/mweb_node.h>
+#include <mweb/mweb_policy.h>
 #include <node/ui_interface.h>
 #include <optional.h>
 #include <policy/fees.h>
@@ -579,6 +580,18 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // MWEB: Don't accept MWEB transactions before activation.
     if (tx.HasMWEBTx() && !IsMWEBEnabled(::ChainActive().Tip(), args.m_chainparams.GetConsensus())) {
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD, "mweb-before-activation");
+    }
+
+    // MWEB: Reject oversized MWEB transactions under relay policy *before* the
+    // expensive signature/rangeproof verification in MWEB::Node::CheckTransaction.
+    // The consensus limits allow a single tx to carry a whole block's worth of
+    // inputs/outputs; verifying that for an unpaid, invalid tx would be a
+    // cheap-to-relay, expensive-to-verify DoS.
+    if (fRequireStandard && tx.HasMWEBTx()) {
+        std::string mweb_reason;
+        if (!MWEB::Policy::CheckWeight(tx, mweb_reason)) {
+            return state.Invalid(TxValidationResult::TX_NOT_STANDARD, mweb_reason);
+        }
     }
 
     // MWEB: Check MWEB tx
@@ -4552,6 +4565,16 @@ bool CChainState::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& i
         // Pass check = true as every addition may be an overwrite.
         AddCoins(inputs, *tx, pindex->nHeight, true);
     }
+
+    if (!block.mweb_block.IsNull()) {
+        // ReplayBlocks recovers after undo data was already written, so the
+        // MWEB undo produced here is only needed transiently while applying state.
+        CBlockUndo blockundo;
+        BlockValidationState state;
+        if (!MWEB::Node::ConnectBlock(block, params.GetConsensus(), pindex->pprev, blockundo, *inputs.GetMWEBCacheView(), state)) {
+            return error("ReplayBlock(): MWEB ConnectBlock failed at %d, hash=%s (%s)", pindex->nHeight, pindex->GetBlockHash().ToString(), state.ToString());
+        }
+    }
     return true;
 }
 
@@ -4586,6 +4609,10 @@ bool CChainState::ReplayBlocks(const CChainParams& params)
         pindexFork = LastCommonAncestor(pindexOld, pindexNew);
         assert(pindexFork != nullptr);
     }
+
+    // DB_BEST_BLOCK is erased while DB_HEAD_BLOCKS marks an interrupted flush, so
+    // initialize the MWEB replay cache from the old head tracked in DB_HEAD_BLOCKS.
+    cache.GetMWEBCacheView()->SetBestHeader(pindexOld ? pindexOld->mweb_header : nullptr);
 
     // Rollback along the old branch.
     while (pindexOld != pindexFork) {

@@ -5,6 +5,8 @@
 
 #include <chainparams.h>
 
+#include <limits>
+
 #include <chainparamsseeds.h>
 #include <consensus/merkle.h>
 #include <hash.h> // for signet block challenge hash
@@ -217,7 +219,7 @@ public:
         consensus.BIP66Height = 0; // 8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573
         consensus.CSVHeight = 0; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
         consensus.SegwitHeight = 0; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
-        consensus.MWEBHeight = 0; // MWEB always active on testnet
+        consensus.MWEBHeight = 432; // MWEB activation; must be > 0, see IsMWEBEnabled/is_first_hogex
         consensus.TaprootHeight = 0; // Taproot always active on testnet
         consensus.nLWMAHeight = 100; // Testnet LWMA activation height
         consensus.nLWMAFixHeight = 200; // Testnet LWMAv2 activation height
@@ -250,7 +252,7 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = 2419200; // 364 days later
 
         consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000000001");
-        consensus.defaultAssumeValid = uint256S("0xf19dfbdc0e6c399ef45d315d89fc3e972dd8da74503252bacaf664f64d86e6f6"); // 
+        consensus.defaultAssumeValid = uint256{}; // testnet is being reset; no assumed-valid block yet
 
         pchMessageStart[0] = 0xd1;
         pchMessageStart[1] = 0xd2;
@@ -268,10 +270,9 @@ public:
 
         vFixedSeeds.clear();
         vSeeds.clear();
-        // nodes with support for servicebits filtering should be at the top
-        vSeeds.emplace_back("testnet-seed.doriancointools.com");
-        vSeeds.emplace_back("seed-b.doriancoin.loshan.co.uk");
-        vSeeds.emplace_back("dnsseed-testnet.thrasher.io");
+        // testnet is being reset; the inherited Litecoin DNS seeds would only
+        // return peers that reject our network magic. Use -addnode/-connect
+        // until a Doriancoin testnet seed exists.
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,22);
@@ -283,7 +284,7 @@ public:
         bech32_hrp = "tdsv";
         mweb_hrp = "tmweb";
 
-        vFixedSeeds = std::vector<uint8_t>(std::begin(chainparams_seed_test), std::end(chainparams_seed_test));
+        // vFixedSeeds intentionally left empty: testnet is being reset.
 
         fDefaultConsistencyChecks = false;
         fRequireStandard = false;
@@ -292,15 +293,15 @@ public:
 
         checkpointData = {
             {
-                {2056, uint256S("17748a31ba97afdc9a4f86837a39d287e3e7c7290a08a1d816c5969c78a83289")},
+                {0, uint256S("0x707769464eb59fdd7b75cdbc5f0e72226345281852325c965b8ee1fd592fbf51")},
             }
         };
 
         chainTxData = ChainTxData{
-            // Data from RPC: getchaintxstats 4096 36d8ad003bac090cf7bf4e24fbe1d319554c8933b9314188d6096ac12648764d
-            /* nTime    */ 1565582448,
-            /* nTxCount */ 2848910,
-            /* dTxRate  */ 0.02265200874042768,
+            // testnet is being reset; no chain history to describe yet
+            /* nTime    */ 0,
+            /* nTxCount */ 0,
+            /* dTxRate  */ 0,
         };
     }
 };
@@ -322,7 +323,11 @@ public:
         consensus.BIP66Height = 1251; // BIP66 activated on regtest (Used in functional tests)
         consensus.CSVHeight = 432; // CSV activated on regtest (Used in rpc activation tests)
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
-        consensus.MWEBHeight = 0; // MWEB always active on regtest
+        // Upstream gates MWEB behind a BIP9 deployment, so it stays inactive on regtest
+        // unless blocks signal for it. As a buried deployment we get no such gate, and
+        // any test that hand-builds blocks past the activation height would be forced to
+        // produce MWEB blocks. Keep it off by default; MWEB tests opt in with -mwebheight.
+        consensus.MWEBHeight = std::numeric_limits<int>::max();
         consensus.TaprootHeight = 0; // Taproot always active on regtest
         consensus.nLWMAHeight = 500; // Low value for regtest testing
         consensus.nLWMAFixHeight = 600; // Regtest LWMAv2 activation height
@@ -369,9 +374,9 @@ public:
 
         UpdateActivationParametersFromArgs(args);
 
-        genesis = CreateGenesisBlock(1394325759, 149343, 0x1e0ffff0, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1296688602, 1, 0x207fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x707769464eb59fdd7b75cdbc5f0e72226345281852325c965b8ee1fd592fbf51"));
+        assert(consensus.hashGenesisBlock == uint256S("0x9a3936706a92dbe81743420e5b7fdb55896b42f368b7bf10d6fccaf6946ff292"));
         assert(genesis.hashMerkleRoot == uint256S("0xa27b7d0a286e46fae3cb7e5b1eae6001fc1b15afee2f6a147291e7eb19746d5d"));
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
@@ -429,6 +434,32 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
             height = std::numeric_limits<int>::max();
         }
         consensus.SegwitHeight = static_cast<int>(height);
+    }
+
+    if (args.IsArgSet("-taprootheight")) {
+        int64_t height = args.GetArg("-taprootheight", consensus.TaprootHeight);
+        if (height < -1 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Activation height %ld for taproot is out of valid range. Use -1 to disable taproot.", height));
+        } else if (height == -1) {
+            LogPrintf("Taproot disabled for testing\n");
+            height = std::numeric_limits<int>::max();
+        }
+        consensus.TaprootHeight = static_cast<int>(height);
+    }
+
+    if (args.IsArgSet("-mwebheight")) {
+        int64_t height = args.GetArg("-mwebheight", consensus.MWEBHeight);
+        if (height < -1 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Activation height %ld for MWEB is out of valid range. Use -1 to disable MWEB.", height));
+        } else if (height == -1) {
+            LogPrintf("MWEB disabled for testing\n");
+            height = std::numeric_limits<int>::max();
+        } else if (height == 0) {
+            // IsMWEBEnabled() treats a null pindexPrev as height 0, so MWEBHeight == 0 makes
+            // is_first_hogex never true and every HogEx is required to spend a previous one.
+            throw std::runtime_error("Activation height 0 for MWEB is not supported. Use -1 to disable MWEB.");
+        }
+        consensus.MWEBHeight = static_cast<int>(height);
     }
 
     if (!args.IsArgSet("-vbparams")) return;

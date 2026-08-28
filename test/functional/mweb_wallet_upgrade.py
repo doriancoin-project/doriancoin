@@ -8,7 +8,7 @@ import os
 import shutil
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.dsv_util import create_non_hd_wallet, setup_mweb_chain
+from test_framework.dsv_util import FIRST_MWEB_HEIGHT, create_non_hd_wallet, setup_mweb_chain
 from test_framework.util import assert_equal
 
 class MWEBWalletUpgradeTest(BitcoinTestFramework):
@@ -16,7 +16,9 @@ class MWEBWalletUpgradeTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 2
         self.extra_args = [['-whitelist=noban@127.0.0.1'],[]]  # immediate tx relay
-
+        # MWEB is off by default on regtest (see CRegTestParams); opt in for this test.
+        _mweb_args = getattr(self, "extra_args", None) or [[]] * self.num_nodes
+        self.extra_args = [list(a) + ["-mwebheight={}".format(FIRST_MWEB_HEIGHT)] for a in _mweb_args]
     def skip_test_if_missing_module(self):
         self.skip_if_no_previous_releases()
         self.skip_if_no_wallet()

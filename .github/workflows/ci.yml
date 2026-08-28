@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build, unit and functional tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libtool autotools-dev automake pkg-config bsdmainutils \
+            python3 python3-venv libssl-dev libevent-dev \
+            libboost-system-dev libboost-filesystem-dev libboost-thread-dev \
+            libboost-test-dev libfmt-dev libsqlite3-dev libdb-dev libdb++-dev \
+            libminiupnpc-dev libzmq3-dev
+
+      - name: autogen
+        run: ./autogen.sh
+
+      # --with-incompatible-bdb: Ubuntu ships BDB 5.3, not the 4.8 used for
+      # release wallets. Test wallets are throwaway, so this is fine here, but
+      # it must not be used for release builds.
+      - name: configure
+        run: |
+          ./configure \
+            --with-incompatible-bdb \
+            --without-gui \
+            --disable-bench \
+            --disable-fuzz-binary
+
+      - name: build
+        run: make -j"$(nproc)"
+
+      - name: Unit tests
+        run: ./src/test/test_doriancoin --run_test='*' --log_level=error
+
+      # blake3 is not vendored and the functional suite imports it.
+      - name: Install functional test dependencies
+        run: |
+          python3 -m venv /tmp/dsvvenv
+          /tmp/dsvvenv/bin/pip install --quiet blake3
+
+      - name: Functional tests
+        run: /tmp/dsvvenv/bin/python test/functional/test_runner.py --jobs="$(nproc)"
+
+      - name: Upload functional test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-test-logs
+          path: /tmp/test_runner_*
+          retention-days: 7
+          if-no-files-found: ignore

@@ -8,6 +8,8 @@ This file is modified from python-bitcoinlib.
 """
 
 from collections import namedtuple
+
+from .ripemd160 import ripemd160
 import hashlib
 import struct
 import unittest
@@ -34,7 +36,7 @@ OPCODE_NAMES = {}  # type: Dict[CScriptOp, str]
 LEAF_VERSION_TAPSCRIPT = 0xc0
 
 def hash160(s):
-    return hashlib.new('ripemd160', sha256(s)).digest()
+    return ripemd160(sha256(s))
 
 def bn2vch(v):
     """Convert number to bitcoin-specific little endian format."""

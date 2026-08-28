@@ -54,8 +54,15 @@ jobs:
           python3 -m venv /tmp/dsvvenv
           /tmp/dsvvenv/bin/pip install --quiet blake3
 
+      # --timeout-factor: GitHub runners are slower and more contended than a
+      # dev machine, and heavy tests (feature_taproot.py) time out waiting for
+      # block sync at the default limits. Scale the timeouts rather than
+      # re-running until green.
       - name: Functional tests
-        run: /tmp/dsvvenv/bin/python test/functional/test_runner.py --jobs="$(nproc)"
+        run: |
+          /tmp/dsvvenv/bin/python test/functional/test_runner.py \
+            --jobs="$(nproc)" \
+            --timeout-factor=3
 
       - name: Upload functional test logs on failure
         if: failure()

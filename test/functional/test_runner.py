@@ -245,6 +245,7 @@ BASE_SCRIPTS = [
     'wallet_scriptaddress2.py',
     'feature_dersig.py',
     'feature_cltv.py',
+    'feature_diffbits.py',
     'mweb_basic.py',
     'mweb_mining.py',
     'mweb_reorg.py',
@@ -314,6 +315,7 @@ NON_SCRIPTS = [
     # These are python files that live in the functional tests directory, but are not test scripts.
     "combine_logs.py",
     "create_cache.py",
+    "doriancoin_scrypt.py",
     "test_runner.py",
 ]
 

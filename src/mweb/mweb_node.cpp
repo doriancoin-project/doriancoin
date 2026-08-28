@@ -36,6 +36,13 @@ bool Node::ContextualCheckBlock(const CBlock& block, const Consensus::Params& co
         if (!block.mweb_block.IsNull()) {
             return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "unexpected-mweb-data", "MWEB not activated, but extension block found");
         }
+        
+        // The HogEx marker is not committed by the canonical merkle root, so before activation it is mutated data, just like an extension block.
+        for (const CTransactionRef& pTx : block.vtx) {
+            if (pTx->IsHogEx()) {
+                return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "unexpected-mweb-data", "MWEB not activated, but HogEx marker found");
+            }
+        }
 
         return true;
     } else if (block.mweb_block.IsNull()) {
@@ -85,6 +92,15 @@ bool Node::ContextualCheckBlock(const CBlock& block, const Consensus::Params& co
     // Verify that the MWEB block's height is correct.
     if (block.mweb_block.GetHeight() != (pindexPrev->nHeight + 1)) {
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "mweb-height-mismatch", "Invalid MWEB block height");
+    }
+
+    // Verify that the MWEB block's pegouts are valid if the pegout feature is active.
+    if (pindexPrev->nHeight + 1 >= consensus_params.mweb_pegout_feature_activation_height) {
+        for (const Kernel& kernel : block.mweb_block.m_block->GetKernels()) {
+            if (!kernel.HasCanonicalPegOutFeature()) {
+                return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-mweb-empty-pegout", "Pegout feature set without pegouts");
+            }
+        }
     }
 
     // For the very first HogEx transaction, all inputs are pegins, so start at index of 0.
@@ -207,7 +223,7 @@ bool Node::ConnectBlock(const CBlock& block, const Consensus::Params& consensus_
         // For the HogEx transaction, the fee must be equal to the total fee of the extension block.
         CAmount hogex_fee = hogex_input_amount - pHogEx->GetValueOut();
         if (!MoneyRange(hogex_fee) || hogex_fee != *mweb_fee) {
-            return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "bad-txns-mweb-fee-mismatch", "HogEx fee does not match MWEB fee."); // TODO: This can be CONSENSUS
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-mweb-fee-mismatch", "HogEx fee does not match MWEB fee.");
         }
 
         // Verify that the value of the first HogEx output matches the expected new value of the MWEB.
@@ -219,12 +235,21 @@ bool Node::ConnectBlock(const CBlock& block, const Consensus::Params& consensus_
         }
 
         if (!MoneyRange(*mweb_amount) || *mweb_amount != pHogEx->vout.front().nValue) {
-            return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "mweb-amount-mismatch", "HogEx amount does not match expected MWEB amount"); // TODO: This can be CONSENSUS
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "mweb-amount-mismatch", "HogEx amount does not match expected MWEB amount");
         }
 
         const bool allow_historical_metadata_mismatch =
             !consensus_params.mweb_input_metadata_grandfather_blockhash.IsNull()
             && block.GetHash() == consensus_params.mweb_input_metadata_grandfather_blockhash;
+
+        try {
+            blockundo.mwundo = mweb_view.ApplyBlock(block.mweb_block.m_block, allow_historical_metadata_mismatch);
+        } catch (const std::exception& e) {
+            // ApplyBlock reconciles the serialized MWEB body against the
+            // header/state commitments. Some failures here can be caused by
+            // mutating MWEB body data without changing the canonical block hash.
+            return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "mweb-connect-failed", strprintf("MWEB::Node::ConnectBlock(): Failed to connect MWEB block: %s", e.what()));
+        }
 
         for (const auto& input : block.mweb_block.m_block->GetInputs()) {
             // Verify that none of the MWEB inputs are spending frozen MWEB outputs.
@@ -234,15 +259,6 @@ bool Node::ConnectBlock(const CBlock& block, const Consensus::Params& consensus_
                         strprintf("MWEB::Node::ConnectBlock(): Frozen MWEB output spent: %s", input.GetOutputID().ToHex()));
                 }
             }
-        }
-
-        try {
-            blockundo.mwundo = mweb_view.ApplyBlock(block.mweb_block.m_block, allow_historical_metadata_mismatch);
-        } catch (const std::exception& e) {
-            // ApplyBlock reconciles the serialized MWEB body against the
-            // header/state commitments. Some failures here can be caused by
-            // mutating MWEB body data without changing the canonical block hash.
-            return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "mweb-connect-failed", strprintf("MWEB::Node::ConnectBlock(): Failed to connect MWEB block: %s", e.what()));
         }
     }
 

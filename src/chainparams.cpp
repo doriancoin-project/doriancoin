@@ -213,8 +213,14 @@ public:
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 840000;
         consensus.BIP16Height = 0; // always enforce P2SH BIP16 on testnet
-        consensus.BIP34Height = 0;
-        consensus.BIP34Hash = uint256S("d21da25e277bd20b7456087d69c5fee2ebc6091b410271b5cb0623c7d1e7d1b9");
+        // Genesis is exempt from the BIP34 coinbase-height rule (see ContextualCheckBlock),
+        // so height 1 is the first block the rule can apply to. Enforced from the start:
+        // this testnet is being mined fresh by software that always writes the height.
+        consensus.BIP34Height = 1;
+        // Was mainnet's genesis hash, copied from CMainParams. It is compared against the
+        // block at BIP34Height to decide whether BIP30 stays enforced; leave it null until
+        // this testnet has a block 1, which keeps BIP30 enforced (as it already was here).
+        consensus.BIP34Hash = uint256();
         consensus.BIP65Height = 0; // 8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573
         consensus.BIP66Height = 0; // 8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573
         consensus.CSVHeight = 0; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb

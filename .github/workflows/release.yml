@@ -153,7 +153,9 @@ jobs:
           mkdir -p out
           if [ "$HOST" = "x86_64-w64-mingw32" ]; then
             make deploy
-            mv "${DISTNAME}-win64-setup.exe" out/
+            setup="$(find . -maxdepth 1 -name '*-win64-setup.exe' -print | head -n 1)"
+            if [ -z "$setup" ]; then echo "make deploy produced no installer" >&2; exit 1; fi
+            mv "$setup" "out/${DISTNAME}-win64-setup.exe"
             ( cd pkg && zip -qr "../out/${DISTNAME}-win64.zip" "${DISTNAME}" )
           else
             tar -czf "out/${DISTNAME}-${HOST}.tar.gz" -C pkg "${DISTNAME}"
@@ -256,7 +258,13 @@ jobs:
           mkdir -p out
 
           make deploy
-          mv Doriancoin-Core.dmg "out/Doriancoin-Core-${VERSION}-${ARCH}.dmg"
+          # macdeployqtplus names the image after the app bundle
+          # (Doriancoin-Qt.dmg); -volname only sets the mounted volume name, so
+          # Makefile.am's $(OSX_VOLNAME).dmg target is not what lands on disk.
+          # Take whatever was produced rather than depending on either name.
+          dmg="$(find . -maxdepth 1 -name '*.dmg' ! -name '*.temp.dmg' -print | head -n 1)"
+          if [ -z "$dmg" ]; then echo "make deploy produced no .dmg" >&2; exit 1; fi
+          mv "$dmg" "out/Doriancoin-Core-${VERSION}-${ARCH}.dmg"
 
           make install DESTDIR="$PWD/pkg/${DISTNAME}"
           tar -czf "out/${DISTNAME}-${ARCH}-apple-darwin.tar.gz" -C pkg "${DISTNAME}"

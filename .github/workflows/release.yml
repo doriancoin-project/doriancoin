@@ -96,11 +96,28 @@ jobs:
       # annotated tags, so without this the binaries stamp themselves
       # v<version>.0-<commit> instead of the tag -- i.e. a release that does not
       # identify itself as one. Re-fetch the real tag object.
+      # Container jobs run as a different user than the one that checked the
+      # repository out, and actions/checkout's safe.directory exception does
+      # not outlive its own step. Without this git refuses to touch the tree,
+      # and genbuild.sh degrades silently: it tests rev-parse and, on failure,
+      # emits no build information at all, stamping binaries "-unk".
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Restore the annotated tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           git fetch --force origin "+${GITHUB_REF}:${GITHUB_REF}"
           git describe --abbrev=0
+
+      - name: Show the version the build will stamp
+        run: |
+          if git describe --abbrev=0 >/dev/null 2>&1 && \
+             [ "$(git rev-parse HEAD)" = "$(git rev-list -1 "$(git describe --abbrev=0)")" ]; then
+            echo "tagged build: $(git describe --abbrev=0)"
+          else
+            echo "untagged build: $(git rev-parse --short HEAD)"
+          fi
 
       - name: Install build dependencies
         run: |
@@ -238,11 +255,28 @@ jobs:
       # annotated tags, so without this the binaries stamp themselves
       # v<version>.0-<commit> instead of the tag -- i.e. a release that does not
       # identify itself as one. Re-fetch the real tag object.
+      # Container jobs run as a different user than the one that checked the
+      # repository out, and actions/checkout's safe.directory exception does
+      # not outlive its own step. Without this git refuses to touch the tree,
+      # and genbuild.sh degrades silently: it tests rev-parse and, on failure,
+      # emits no build information at all, stamping binaries "-unk".
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Restore the annotated tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           git fetch --force origin "+${GITHUB_REF}:${GITHUB_REF}"
           git describe --abbrev=0
+
+      - name: Show the version the build will stamp
+        run: |
+          if git describe --abbrev=0 >/dev/null 2>&1 && \
+             [ "$(git rev-parse HEAD)" = "$(git rev-list -1 "$(git describe --abbrev=0)")" ]; then
+            echo "tagged build: $(git describe --abbrev=0)"
+          else
+            echo "untagged build: $(git rev-parse --short HEAD)"
+          fi
 
       # depends/ in this tree is 0.21-era: it pins an Xcode 12.1 SDK and has no
       # arm64-apple-darwin host, so it is only usable for cross builds from

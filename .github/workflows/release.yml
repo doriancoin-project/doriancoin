@@ -46,7 +46,7 @@ jobs:
             packages: ''
             configure_flags: '--enable-reduce-exports'
           - host: aarch64-linux-gnu
-            packages: 'g++-aarch64-linux-gnu'
+            packages: 'g++-aarch64-linux-gnu binutils-aarch64-linux-gnu'
             configure_flags: '--enable-reduce-exports'
           - host: x86_64-w64-mingw32
             packages: 'g++-mingw-w64-x86-64 nsis'
@@ -79,7 +79,9 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get install -y --no-install-recommends \
             build-essential libtool autotools-dev automake pkg-config bsdmainutils \
-            curl ca-certificates python3 patch bison zip ${{ matrix.packages }}
+            binutils-gold cmake curl ca-certificates python3 python3-setuptools \
+            patch bison zip unzip xz-utils libz-dev libbz2-dev \
+            ${{ matrix.packages }}
 
       # mingw-w64 defaults to the win32 threading model, which lacks the C++11
       # std::thread support the tree needs.

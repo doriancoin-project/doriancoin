@@ -774,6 +774,20 @@ for p in config.add_resources:
 
 # ------------------------------------------------
 
+# Deploying rewrote every copied dylib's load commands with install_name_tool,
+# which invalidates the ad-hoc signature the linker gave it. arm64 refuses to
+# map a Mach-O whose signature does not match, so the bundle we just assembled
+# cannot launch at all, and Gatekeeper reports a quarantined copy of it as
+# "damaged and can't be opened" with no way to override. Re-sign ad-hoc to
+# repair that. This is not a substitute for a Developer ID signature -- an
+# ad-hoc bundle is still not notarized -- but it is the difference between an
+# app that runs and one that does not.
+if sys.platform == "darwin":
+    if verbose >= 1:
+        print("Ad-hoc signing app bundle {}".format(target))
+    subprocess.check_call(["codesign", "--force", "--deep", "--sign", "-", target])
+
+# A real identity, when one is available, layers over the ad-hoc signature.
 if config.sign and 'CODESIGNARGS' not in os.environ:
     print("You must set the CODESIGNARGS environment variable. Skipping signing.")
 elif config.sign:

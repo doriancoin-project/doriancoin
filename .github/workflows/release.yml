@@ -20,6 +20,12 @@ on:
 permissions:
   contents: write
 
+# Container jobs get sh (dash) as the default shell, which has no pipefail, so
+# every "set -euo pipefail" script fails on its first line. Ask for bash.
+defaults:
+  run:
+    shell: bash
+
 # Supersede in-flight validation runs when a pull request is pushed to again,
 # but never cancel a tag build partway through a release.
 concurrency:

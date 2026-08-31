@@ -149,6 +149,13 @@ $(package)_config_opts_mingw32 += -no-dbus
 $(package)_config_opts_mingw32 += -no-direct2d
 $(package)_config_opts_mingw32 += -xplatform win32-g++
 $(package)_config_opts_mingw32 += -device-option CROSS_COMPILE="$(host)-"
+# mingw-w64 only declares the touch API, TOUCHINPUT included, behind
+# WINVER >= 0x0601. Qt ships its own fallback declarations, which the seds in
+# $(package)_preprocess_cmds strip so they cannot collide with the toolchain's
+# -- that leaves nothing declaring them unless the guard is satisfied here.
+# configure.ac:631 already builds the rest of the tree at 0x0601; match it.
+$(package)_config_opts_mingw32 += -D WINVER=0x0601
+$(package)_config_opts_mingw32 += -D _WIN32_WINNT=0x0601
 
 $(package)_config_opts_android = -xplatform android-clang
 $(package)_config_opts_android += -android-sdk $(ANDROID_SDK)

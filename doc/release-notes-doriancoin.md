@@ -49,6 +49,14 @@ verify the download against `SHA256SUMS` and then allow it:
   Doriancoin Core, and click **Open Anyway**; or
 - from a terminal, `xattr -dr com.apple.quarantine /Applications/Doriancoin-Qt.app`.
 
+Windows: SmartScreen on the installer
+-------------------------------------
+
+The installer is unsigned, so SmartScreen shows "Windows protected your PC"
+and hides the button that proceeds. Click **More info**, then **Run anyway**.
+As on macOS, this reflects the absence of a paid code-signing certificate
+rather than anything wrong with the download; check it against `SHA256SUMS`.
+
 Notable changes
 ===============
 

@@ -1,0 +1,255 @@
+name: Release
+
+# Pushing a v* tag builds every target and opens a DRAFT release with the
+# artifacts and a SHA256SUMS attached. Nothing is published automatically --
+# review the draft, sign SHA256SUMS locally, attach SHA256SUMS.asc, publish.
+#
+# workflow_dispatch runs the same builds without touching releases, which is
+# how you validate a change to this file before tagging anything.
+on:
+  push:
+    tags:
+      - 'v*'
+  # Changes to this file rebuild every target so it can be validated without
+  # tagging. The paths filter keeps that off every other pull request.
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-windows:
+    name: ${{ matrix.host }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: x86_64-linux-gnu
+            packages: ''
+            configure_flags: '--enable-reduce-exports'
+          - host: aarch64-linux-gnu
+            packages: 'g++-aarch64-linux-gnu'
+            configure_flags: '--enable-reduce-exports'
+          - host: x86_64-w64-mingw32
+            packages: 'g++-mingw-w64-x86-64 nsis'
+            configure_flags: ''
+
+    steps:
+      # genbuild.sh stamps the binary with the tag name only when HEAD is the
+      # tagged commit, so the full history and tags have to be present.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libtool autotools-dev automake pkg-config bsdmainutils \
+            curl ca-certificates python3 patch bison zip ${{ matrix.packages }}
+
+      # mingw-w64 defaults to the win32 threading model, which lacks the C++11
+      # std::thread support the tree needs.
+      - name: Select posix threads for mingw-w64
+        if: matrix.host == 'x86_64-w64-mingw32'
+        run: |
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
+      - name: Cache depends
+        uses: actions/cache@v4
+        with:
+          path: |
+            depends/built
+            depends/sources
+            depends/${{ matrix.host }}
+          key: depends-${{ matrix.host }}-${{ hashFiles('depends/packages/*.mk', 'depends/hosts/*.mk', 'depends/*.mk', 'depends/Makefile') }}
+          restore-keys: |
+            depends-${{ matrix.host }}-
+
+      - name: Build depends
+        run: make -C depends -j"$(nproc)" HOST=${{ matrix.host }}
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          # No --with-incompatible-bdb here: release wallets need the BDB 4.8
+          # that depends builds, or wallet files stop being portable.
+          CONFIG_SITE="$PWD/depends/${{ matrix.host }}/share/config.site" \
+            ./configure --prefix=/ --disable-bench --disable-fuzz-binary ${{ matrix.configure_flags }}
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      - name: Record version
+        id: version
+        run: echo "version=$(sed -n 's/^#define PACKAGE_VERSION "\(.*\)"$/\1/p' src/config/bitcoin-config.h)" >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          HOST: ${{ matrix.host }}
+        run: |
+          set -euo pipefail
+          DISTNAME="doriancoin-${VERSION}"
+          make install DESTDIR="$PWD/pkg/${DISTNAME}"
+          find "pkg/${DISTNAME}" -type f \( -name '*.exe' -o -perm -u+x \) \
+            -exec "${HOST}-strip" --strip-unneeded {} + 2>/dev/null || true
+
+          mkdir -p out
+          if [ "$HOST" = "x86_64-w64-mingw32" ]; then
+            make deploy
+            mv "${DISTNAME}-win64-setup.exe" out/
+            ( cd pkg && zip -qr "../out/${DISTNAME}-win64.zip" "${DISTNAME}" )
+          else
+            tar -czf "out/${DISTNAME}-${HOST}.tar.gz" -C pkg "${DISTNAME}"
+          fi
+          ls -lh out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.host }}
+          path: out/*
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+          - runner: macos-14
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # depends/ in this tree is 0.21-era: it pins an Xcode 12.1 SDK and has no
+      # arm64-apple-darwin host, so it is only usable for cross builds from
+      # Linux with an SDK supplied out of band. Build natively against Homebrew
+      # instead, which is the route doc/build-osx.md documents.
+      #
+      # librsvg supplies rsvg-convert for the .dmg background; tiffutil, which
+      # consumes it, ships with macOS.
+      - name: Install build dependencies
+        run: |
+          brew install automake libtool boost miniupnpc pkg-config \
+            qt@5 libevent qrencode fmt librsvg zeromq sqlite
+
+      - name: Cache Berkeley DB 4.8
+        id: cache-db4
+        uses: actions/cache@v4
+        with:
+          path: db4
+          key: db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}
+
+      # Release wallets need BDB 4.8 specifically, or wallet files stop being
+      # portable between builds. Homebrew's formula name has drifted over the
+      # years, so build it from source the way the docs recommend.
+      - name: Build Berkeley DB 4.8
+        if: steps.cache-db4.outputs.cache-hit != 'true'
+        run: ./contrib/install_db4.sh "$PWD"
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          BREW_PREFIX="$(brew --prefix)"
+          BDB_PREFIX="$PWD/db4"
+          ./autogen.sh
+          ./configure \
+            --prefix=/ \
+            --disable-bench \
+            --disable-fuzz-binary \
+            --with-boost-libdir="${BREW_PREFIX}/lib" \
+            BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" \
+            BDB_CFLAGS="-I${BDB_PREFIX}/include" \
+            LDFLAGS="-L${BREW_PREFIX}/lib -L${BREW_PREFIX}/opt/fmt/lib -L${BREW_PREFIX}/opt/qt@5/lib" \
+            CPPFLAGS="-I${BREW_PREFIX}/include -I${BREW_PREFIX}/opt/fmt/include -I${BREW_PREFIX}/opt/qt@5/include" \
+            PKG_CONFIG_PATH="${BREW_PREFIX}/opt/qt@5/lib/pkgconfig"
+
+      - name: Build
+        run: make -j"$(sysctl -n hw.logicalcpu)"
+
+      - name: Record version
+        id: version
+        run: echo "version=$(sed -n 's/^#define PACKAGE_VERSION "\(.*\)"$/\1/p' src/config/bitcoin-config.h)" >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          DISTNAME="doriancoin-${VERSION}"
+          mkdir -p out
+
+          make deploy
+          mv Doriancoin-Core.dmg "out/Doriancoin-Core-${VERSION}-${ARCH}.dmg"
+
+          make install DESTDIR="$PWD/pkg/${DISTNAME}"
+          tar -czf "out/${DISTNAME}-${ARCH}-apple-darwin.tar.gz" -C pkg "${DISTNAME}"
+          ls -lh out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}-apple-darwin
+          path: out/*
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft release
+    needs: [build-linux-windows, build-macos]
+    # Only a tag push publishes anything. workflow_dispatch is build-only, so
+    # this file can be iterated on without leaving stray tags or releases.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Draft, so the assets can be checked and SHA256SUMS.asc attached before
+      # anyone can download them.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -f doc/release-notes-doriancoin.md ]; then
+            NOTES=(--notes-file doc/release-notes-doriancoin.md)
+          else
+            echo "::warning::doc/release-notes-doriancoin.md missing, falling back to generated notes"
+            NOTES=(--generate-notes)
+          fi
+          gh release create "$TAG" \
+            --draft \
+            --title "Doriancoin Core $TAG" \
+            "${NOTES[@]}" \
+            dist/*

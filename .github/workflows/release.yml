@@ -196,7 +196,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13
+          # macos-13 never picked up a single job across eleven runs -- 75
+          # minutes queued while the arm64 pool started instantly -- so that
+          # label has no usable capacity. macos-15-intel is its replacement.
+          - runner: macos-15-intel
             arch: x86_64
             db4_flags: ''
           # BDB 4.8 predates Apple Silicon twice over. config.guess reports
@@ -231,6 +234,10 @@ jobs:
         with:
           path: db4
           key: db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}-${{ hashFiles('.github/workflows/release.yml') }}
+          # Keyed on the workflow file only for matrix.db4_flags; a partial
+          # prefix match is still worth restoring when other edits land.
+          restore-keys: |
+            db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}-
 
       # Release wallets need BDB 4.8 specifically, or wallet files stop being
       # portable between builds. Homebrew's formula name has drifted over the

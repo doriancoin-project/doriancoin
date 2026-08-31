@@ -84,8 +84,19 @@ CONFIG_SUB_HASH='3a4befde9bcdf0fdb2763fc1bfa74e8696df94e1ad7aac8042d133c8ff1d2e3
 rm -f "dist/config.guess"
 rm -f "dist/config.sub"
 
-http_get "${CONFIG_GUESS_URL}" dist/config.guess "${CONFIG_GUESS_HASH}"
-http_get "${CONFIG_SUB_URL}" dist/config.sub "${CONFIG_SUB_HASH}"
+# Callers that already have suitable copies (the depends tree ships a pair)
+# can point at them and skip the download entirely. Savannah rate-limits, so
+# for automated builds this is the difference between a reproducible run and
+# an intermittent one.
+if [ -n "${CONFIG_GUESS_SRC}" ] && [ -n "${CONFIG_SUB_SRC}" ]; then
+  echo "Using local config.guess (${CONFIG_GUESS_SRC}) and config.sub (${CONFIG_SUB_SRC})"
+  cp "${CONFIG_GUESS_SRC}" dist/config.guess
+  cp "${CONFIG_SUB_SRC}" dist/config.sub
+  chmod +x dist/config.guess dist/config.sub
+else
+  http_get "${CONFIG_GUESS_URL}" dist/config.guess "${CONFIG_GUESS_HASH}"
+  http_get "${CONFIG_SUB_URL}" dist/config.sub "${CONFIG_SUB_HASH}"
+fi
 
 cd build_unix/
 

@@ -158,12 +158,14 @@ jobs:
           - runner: macos-13
             arch: x86_64
             db4_flags: ''
-          # BDB 4.8 predates Apple Silicon: its configure finds no atomic or
-          # shared-latch implementation for arm64-apple-darwin and bails with
-          # "Unable to find a mutex implementation". Force the pthread one.
+          # BDB 4.8 predates Apple Silicon twice over. config.guess reports
+          # Apple Silicon as "arm-apple-darwin", i.e. 32-bit ARM, so name the
+          # build explicitly -- config.sub accepts the aarch64 spelling but
+          # not arm64. Even correctly identified there is no aarch64 assembly
+          # in a 2010 release, hence the pthread mutex.
           - runner: macos-14
             arch: arm64
-            db4_flags: '--with-mutex=POSIX/pthreads/library'
+            db4_flags: '--build=aarch64-apple-darwin --with-mutex=POSIX/pthreads/library'
 
     steps:
       - uses: actions/checkout@v4
@@ -194,6 +196,11 @@ jobs:
       # years, so build it from source the way the docs recommend.
       - name: Build Berkeley DB 4.8
         if: steps.cache-db4.outputs.cache-hit != 'true'
+        env:
+          # Skip the savannah download; the depends tree already ships a pair
+          # new enough to canonicalise aarch64-apple-darwin.
+          CONFIG_GUESS_SRC: depends/config.guess
+          CONFIG_SUB_SRC: depends/config.sub
         run: ./contrib/install_db4.sh "$PWD" ${{ matrix.db4_flags }}
 
       - name: Configure

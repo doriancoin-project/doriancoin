@@ -20,6 +20,12 @@ on:
 permissions:
   contents: write
 
+# Supersede in-flight validation runs when a pull request is pushed to again,
+# but never cancel a tag build partway through a release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-linux-windows:
     name: ${{ matrix.host }}
@@ -149,8 +155,13 @@ jobs:
         include:
           - runner: macos-13
             arch: x86_64
+            db4_flags: ''
+          # BDB 4.8 predates Apple Silicon: its configure finds no atomic or
+          # shared-latch implementation for arm64-apple-darwin and bails with
+          # "Unable to find a mutex implementation". Force the pthread one.
           - runner: macos-14
             arch: arm64
+            db4_flags: '--with-mutex=POSIX/pthreads/library'
 
     steps:
       - uses: actions/checkout@v4
@@ -174,14 +185,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: db4
-          key: db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}
+          key: db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}-${{ hashFiles('.github/workflows/release.yml') }}
 
       # Release wallets need BDB 4.8 specifically, or wallet files stop being
       # portable between builds. Homebrew's formula name has drifted over the
       # years, so build it from source the way the docs recommend.
       - name: Build Berkeley DB 4.8
         if: steps.cache-db4.outputs.cache-hit != 'true'
-        run: ./contrib/install_db4.sh "$PWD"
+        run: ./contrib/install_db4.sh "$PWD" ${{ matrix.db4_flags }}
 
       - name: Configure
         run: |

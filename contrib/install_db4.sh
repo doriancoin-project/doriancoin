@@ -21,6 +21,15 @@ expand_path() {
 }
 
 BDB_PREFIX="$(expand_path ${1})/db4"; shift;
+
+# Resolve these before anything cd's, so a caller can pass paths relative to
+# their own working directory.
+if [ -n "${CONFIG_GUESS_SRC}" ]; then
+  CONFIG_GUESS_SRC="$(expand_path "$(dirname "${CONFIG_GUESS_SRC}")")/$(basename "${CONFIG_GUESS_SRC}")"
+fi
+if [ -n "${CONFIG_SUB_SRC}" ]; then
+  CONFIG_SUB_SRC="$(expand_path "$(dirname "${CONFIG_SUB_SRC}")")/$(basename "${CONFIG_SUB_SRC}")"
+fi
 BDB_VERSION='db-4.8.30.NC'
 BDB_HASH='12edc0df75bf9abd7f82f821795bcee50f42cb2e5f76a6a281b85732798364ef'
 BDB_URL="https://download.oracle.com/berkeley-db/${BDB_VERSION}.tar.gz"

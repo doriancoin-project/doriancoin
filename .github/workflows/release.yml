@@ -347,6 +347,14 @@ jobs:
           mkdir -p out
 
           make deploy
+
+          # macdeployqtplus ad-hoc signs the bundle after it rewrites the
+          # copied dylibs' load commands. Confirm that actually held: an
+          # invalid signature here ships a .dmg that cannot launch on any
+          # Apple Silicon Mac, and macOS reports it as "damaged" rather than
+          # as a signing problem, so it is worth failing the build over.
+          codesign --verify --deep --strict --verbose=2 dist/Doriancoin-Qt.app
+
           # macdeployqtplus names the image after the app bundle
           # (Doriancoin-Qt.dmg); -volname only sets the mounted volume name, so
           # Makefile.am's $(OSX_VOLNAME).dmg target is not what lands on disk.
@@ -355,8 +363,17 @@ jobs:
           if [ -z "$dmg" ]; then echo "make deploy produced no .dmg" >&2; exit 1; fi
           mv "$dmg" "out/Doriancoin-Core-${VERSION}-${ARCH}.dmg"
 
-          make install DESTDIR="$PWD/pkg/${DISTNAME}"
-          tar -czf "out/${DISTNAME}-${ARCH}-apple-darwin.tar.gz" -C pkg "${DISTNAME}"
+          # No macOS tarball. These are built against Homebrew rather than
+          # depends, so "make install" output links to /opt/homebrew/... or
+          # /usr/local/... and is loadable only on a machine with the same
+          # formulae installed:
+          #   dyld: Library not loaded: /usr/local/opt/boost/lib/libboost_filesystem.dylib
+          # The .dmg is unaffected because macdeployqtplus copies every
+          # non-system dylib into Contents/Frameworks and rewrites the paths to
+          # @executable_path. v0.21.80 shipped a .dmg only for the same reason,
+          # so nothing is lost by matching it. Shipping a self-contained macOS
+          # tarball would mean relinking the CLI binaries the way the app
+          # bundle is, which is worth doing but is not this change.
           ls -lh out/
 
       - uses: actions/upload-artifact@v4

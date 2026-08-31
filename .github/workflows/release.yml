@@ -1,0 +1,408 @@
+name: Release
+
+# Pushing a v* tag builds every target and opens a DRAFT release with the
+# artifacts and a SHA256SUMS attached. Nothing is published automatically --
+# review the draft, sign SHA256SUMS locally, attach SHA256SUMS.asc, publish.
+#
+# workflow_dispatch runs the same builds without touching releases, which is
+# how you validate a change to this file before tagging anything.
+on:
+  push:
+    tags:
+      - 'v*'
+  # Changes to this file rebuild every target so it can be validated without
+  # tagging. The paths filter keeps that off every other pull request.
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Container jobs get sh (dash) as the default shell, which has no pipefail, so
+# every "set -euo pipefail" script fails on its first line. Ask for bash.
+defaults:
+  run:
+    shell: bash
+
+# Supersede in-flight validation runs when a pull request is pushed to again,
+# but never cancel a tag build partway through a release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-linux-windows:
+    name: ${{ matrix.host }}
+    runs-on: ubuntu-22.04
+    # Only the native Linux hosts need the old base. See matrix.container.
+    container: ${{ matrix.container }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # boost 1.70 cannot preprocess "#if PTHREAD_STACK_MIN > 0": glibc 2.34
+          # turned that macro into a sysconf() call, so it is no longer a
+          # constant expression and libs/thread fails on any modern image.
+          # A glibc 2.31 base sidesteps it without patching boost, and drops
+          # the released binaries' glibc floor from 2.35 to 2.31.
+          - host: x86_64-linux-gnu
+            container: 'ubuntu:20.04'
+            packages: ''
+            configure_flags: '--enable-reduce-exports'
+          - host: aarch64-linux-gnu
+            container: 'ubuntu:20.04'
+            packages: 'g++-aarch64-linux-gnu binutils-aarch64-linux-gnu'
+            configure_flags: '--enable-reduce-exports'
+          # Windows wants the opposite: no container, so it gets the runner's
+          # newer mingw-w64. Neither reason for the old base applies here --
+          # boost.mk builds mingw32 with threadapi=win32 and never touches the
+          # pthread path, and a Windows binary does not link glibc. Meanwhile
+          # 6f3bbb4bd strips Qt 5.9.8's own TOUCHINPUT typedef so the toolchain
+          # header supplies it, which mingw-w64 7.x on focal does not do.
+          - host: x86_64-w64-mingw32
+            container: ''
+            packages: 'g++-mingw-w64-x86-64 nsis'
+            configure_flags: ''
+
+    steps:
+      # focal is past end of standard support, so its packages may have moved
+      # to old-releases. Try the stock mirrors first and rewrite only if they
+      # have actually gone away.
+      - name: Prepare apt sources
+        if: matrix.container != ''
+        run: |
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update || {
+            sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g; s|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
+            apt-get update
+          }
+          # actions/checkout falls back to a REST tarball without git, which
+          # would leave no .git for genbuild.sh to read the tag from.
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      # genbuild.sh stamps the binary with the tag name only when HEAD is the
+      # tagged commit, so the full history and tags have to be present.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # actions/checkout overwrites refs/tags/<name> with a lightweight ref
+      # pointing at the commit, discarding the annotated tag object. genbuild.sh
+      # calls "git describe --abbrev=0" without --tags, which only considers
+      # annotated tags, so without this the binaries stamp themselves
+      # v<version>.0-<commit> instead of the tag -- i.e. a release that does not
+      # identify itself as one. Re-fetch the real tag object.
+      # Container jobs run as a different user than the one that checked the
+      # repository out, and actions/checkout's safe.directory exception does
+      # not outlive its own step. Without this git refuses to touch the tree,
+      # and genbuild.sh degrades silently: it tests rev-parse and, on failure,
+      # emits no build information at all, stamping binaries "-unk".
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Restore the annotated tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          git fetch --force origin "+${GITHUB_REF}:${GITHUB_REF}"
+          git describe --abbrev=0
+
+      - name: Show the version the build will stamp
+        run: |
+          if git describe --abbrev=0 >/dev/null 2>&1 && \
+             [ "$(git rev-parse HEAD)" = "$(git rev-list -1 "$(git describe --abbrev=0)")" ]; then
+            echo "tagged build: $(git describe --abbrev=0)"
+          else
+            echo "untagged build: $(git rev-parse --short HEAD)"
+          fi
+
+      - name: Install build dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          # root inside the container, an unprivileged user on a bare runner
+          SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
+            build-essential libtool autotools-dev automake pkg-config bsdmainutils \
+            binutils-gold cmake curl ca-certificates python3 python3-setuptools \
+            patch bison zip unzip xz-utils libz-dev libbz2-dev \
+            ${{ matrix.packages }}
+
+      # mingw-w64 defaults to the win32 threading model, which lacks the C++11
+      # std::thread support the tree needs.
+      - name: Select posix threads for mingw-w64
+        if: matrix.host == 'x86_64-w64-mingw32'
+        run: |
+          SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+          $SUDO update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          $SUDO update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
+      # Rolling key: every run saves its own entry and restores the newest
+      # matching prefix, so a partially built tree is never stranded behind an
+      # already-taken exact key.
+      - name: Restore depends cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            depends/built
+            depends/sources
+            depends/${{ matrix.host }}
+          key: depends-${{ matrix.host }}-${{ hashFiles('depends/packages/*.mk', 'depends/hosts/*.mk', 'depends/*.mk', 'depends/Makefile') }}-${{ github.run_id }}
+          restore-keys: |
+            depends-${{ matrix.host }}-${{ hashFiles('depends/packages/*.mk', 'depends/hosts/*.mk', 'depends/*.mk', 'depends/Makefile') }}-
+            depends-${{ matrix.host }}-
+
+      - name: Build depends
+        run: make -C depends -j"$(nproc)" HOST=${{ matrix.host }}
+
+      # actions/cache only saves when the job succeeds, so any later failure
+      # used to discard the whole depends tree and rebuild Qt from scratch next
+      # time. depends is stamp-file based and resumes cleanly from a partial
+      # tree, so save it either way.
+      - name: Save depends cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            depends/built
+            depends/sources
+            depends/${{ matrix.host }}
+          key: depends-${{ matrix.host }}-${{ hashFiles('depends/packages/*.mk', 'depends/hosts/*.mk', 'depends/*.mk', 'depends/Makefile') }}-${{ github.run_id }}
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          # No --with-incompatible-bdb here: release wallets need the BDB 4.8
+          # that depends builds, or wallet files stop being portable.
+          CONFIG_SITE="$PWD/depends/${{ matrix.host }}/share/config.site" \
+            ./configure --prefix=/ --disable-bench --disable-fuzz-binary ${{ matrix.configure_flags }}
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      - name: Record version
+        id: version
+        run: echo "version=$(sed -n 's/^#define PACKAGE_VERSION "\(.*\)"$/\1/p' src/config/bitcoin-config.h)" >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          HOST: ${{ matrix.host }}
+        run: |
+          set -euo pipefail
+          DISTNAME="doriancoin-${VERSION}"
+          make install DESTDIR="$PWD/pkg/${DISTNAME}"
+          find "pkg/${DISTNAME}" -type f \( -name '*.exe' -o -perm -u+x \) \
+            -exec "${HOST}-strip" --strip-unneeded {} + 2>/dev/null || true
+
+          mkdir -p out
+          if [ "$HOST" = "x86_64-w64-mingw32" ]; then
+            make deploy
+            setup="$(find . -maxdepth 1 -name '*-win64-setup.exe' -print | head -n 1)"
+            if [ -z "$setup" ]; then echo "make deploy produced no installer" >&2; exit 1; fi
+            mv "$setup" "out/${DISTNAME}-win64-setup.exe"
+            ( cd pkg && zip -qr "../out/${DISTNAME}-win64.zip" "${DISTNAME}" )
+          else
+            tar -czf "out/${DISTNAME}-${HOST}.tar.gz" -C pkg "${DISTNAME}"
+          fi
+          ls -lh out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.host }}
+          path: out/*
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-13 never picked up a single job across eleven runs -- 75
+          # minutes queued while the arm64 pool started instantly -- so that
+          # label has no usable capacity. macos-15-intel is its replacement.
+          - runner: macos-15-intel
+            arch: x86_64
+            # BDB 4.8's x86 inline-assembly probe does not pass under modern
+            # clang, so it degrades to UNIX/fcntl, which offers no shared
+            # latch and is then rejected. Same pthread mutex as arm64; the
+            # host triplet is detected correctly here, so no --build.
+            db4_flags: '--with-mutex=POSIX/pthreads/library'
+          # BDB 4.8 predates Apple Silicon twice over. config.guess reports
+          # Apple Silicon as "arm-apple-darwin", i.e. 32-bit ARM, so name the
+          # build explicitly -- config.sub accepts the aarch64 spelling but
+          # not arm64. Even correctly identified there is no aarch64 assembly
+          # in a 2010 release, hence the pthread mutex.
+          - runner: macos-14
+            arch: arm64
+            db4_flags: '--build=aarch64-apple-darwin --with-mutex=POSIX/pthreads/library'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # actions/checkout overwrites refs/tags/<name> with a lightweight ref
+      # pointing at the commit, discarding the annotated tag object. genbuild.sh
+      # calls "git describe --abbrev=0" without --tags, which only considers
+      # annotated tags, so without this the binaries stamp themselves
+      # v<version>.0-<commit> instead of the tag -- i.e. a release that does not
+      # identify itself as one. Re-fetch the real tag object.
+      # Container jobs run as a different user than the one that checked the
+      # repository out, and actions/checkout's safe.directory exception does
+      # not outlive its own step. Without this git refuses to touch the tree,
+      # and genbuild.sh degrades silently: it tests rev-parse and, on failure,
+      # emits no build information at all, stamping binaries "-unk".
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Restore the annotated tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          git fetch --force origin "+${GITHUB_REF}:${GITHUB_REF}"
+          git describe --abbrev=0
+
+      - name: Show the version the build will stamp
+        run: |
+          if git describe --abbrev=0 >/dev/null 2>&1 && \
+             [ "$(git rev-parse HEAD)" = "$(git rev-list -1 "$(git describe --abbrev=0)")" ]; then
+            echo "tagged build: $(git describe --abbrev=0)"
+          else
+            echo "untagged build: $(git rev-parse --short HEAD)"
+          fi
+
+      # depends/ in this tree is 0.21-era: it pins an Xcode 12.1 SDK and has no
+      # arm64-apple-darwin host, so it is only usable for cross builds from
+      # Linux with an SDK supplied out of band. Build natively against Homebrew
+      # instead, which is the route doc/build-osx.md documents.
+      #
+      # librsvg supplies rsvg-convert for the .dmg background; tiffutil, which
+      # consumes it, ships with macOS.
+      - name: Install build dependencies
+        run: |
+          brew install automake libtool boost miniupnpc pkg-config \
+            qt@5 libevent qrencode fmt librsvg zeromq sqlite
+
+      - name: Cache Berkeley DB 4.8
+        id: cache-db4
+        uses: actions/cache@v4
+        with:
+          path: db4
+          key: db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}-${{ hashFiles('.github/workflows/release.yml') }}
+          # Keyed on the workflow file only for matrix.db4_flags; a partial
+          # prefix match is still worth restoring when other edits land.
+          restore-keys: |
+            db4-${{ matrix.arch }}-${{ hashFiles('contrib/install_db4.sh') }}-
+
+      # Release wallets need BDB 4.8 specifically, or wallet files stop being
+      # portable between builds. Homebrew's formula name has drifted over the
+      # years, so build it from source the way the docs recommend.
+      - name: Build Berkeley DB 4.8
+        if: steps.cache-db4.outputs.cache-hit != 'true'
+        env:
+          # Skip the savannah download; the depends tree already ships a pair
+          # new enough to canonicalise aarch64-apple-darwin.
+          CONFIG_GUESS_SRC: depends/config.guess
+          CONFIG_SUB_SRC: depends/config.sub
+        run: ./contrib/install_db4.sh "$PWD" ${{ matrix.db4_flags }}
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          BREW_PREFIX="$(brew --prefix)"
+          BDB_PREFIX="$PWD/db4"
+          ./autogen.sh
+          ./configure \
+            --prefix=/ \
+            --disable-bench \
+            --disable-fuzz-binary \
+            --with-boost-libdir="${BREW_PREFIX}/lib" \
+            BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" \
+            BDB_CFLAGS="-I${BDB_PREFIX}/include" \
+            LDFLAGS="-L${BREW_PREFIX}/lib -L${BREW_PREFIX}/opt/fmt/lib -L${BREW_PREFIX}/opt/qt@5/lib" \
+            CPPFLAGS="-I${BREW_PREFIX}/include -I${BREW_PREFIX}/opt/fmt/include -I${BREW_PREFIX}/opt/qt@5/include" \
+            PKG_CONFIG_PATH="${BREW_PREFIX}/opt/qt@5/lib/pkgconfig"
+
+      - name: Build
+        run: make -j"$(sysctl -n hw.logicalcpu)"
+
+      - name: Record version
+        id: version
+        run: echo "version=$(sed -n 's/^#define PACKAGE_VERSION "\(.*\)"$/\1/p' src/config/bitcoin-config.h)" >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          DISTNAME="doriancoin-${VERSION}"
+          mkdir -p out
+
+          make deploy
+          # macdeployqtplus names the image after the app bundle
+          # (Doriancoin-Qt.dmg); -volname only sets the mounted volume name, so
+          # Makefile.am's $(OSX_VOLNAME).dmg target is not what lands on disk.
+          # Take whatever was produced rather than depending on either name.
+          dmg="$(find . -maxdepth 1 -name '*.dmg' ! -name '*.temp.dmg' -print | head -n 1)"
+          if [ -z "$dmg" ]; then echo "make deploy produced no .dmg" >&2; exit 1; fi
+          mv "$dmg" "out/Doriancoin-Core-${VERSION}-${ARCH}.dmg"
+
+          make install DESTDIR="$PWD/pkg/${DISTNAME}"
+          tar -czf "out/${DISTNAME}-${ARCH}-apple-darwin.tar.gz" -C pkg "${DISTNAME}"
+          ls -lh out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}-apple-darwin
+          path: out/*
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft release
+    needs: [build-linux-windows, build-macos]
+    # Only a tag push publishes anything. workflow_dispatch is build-only, so
+    # this file can be iterated on without leaving stray tags or releases.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Draft, so the assets can be checked and SHA256SUMS.asc attached before
+      # anyone can download them.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -f doc/release-notes-doriancoin.md ]; then
+            NOTES=(--notes-file doc/release-notes-doriancoin.md)
+          else
+            echo "::warning::doc/release-notes-doriancoin.md missing, falling back to generated notes"
+            NOTES=(--generate-notes)
+          fi
+          gh release create "$TAG" \
+            --draft \
+            --title "Doriancoin Core $TAG" \
+            "${NOTES[@]}" \
+            dist/*

@@ -43,7 +43,9 @@
 #include <cpuid.h>
 #endif
 #endif
-#if !defined(__FreeBSD__) && !defined(__APPLE__)
+// Mirrors the le32 condition in scrypt.h: these come from <sys/endian.h> only
+// where configure actually found that header, not on macOS generally.
+#if !defined(__FreeBSD__) && !(defined(__APPLE__) && defined(HAVE_SYS_ENDIAN_H))
 static inline uint32_t be32dec(const void *pp)
 {
 	const uint8_t *p = (uint8_t const *)pp;

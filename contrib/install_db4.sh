@@ -21,6 +21,15 @@ expand_path() {
 }
 
 BDB_PREFIX="$(expand_path ${1})/db4"; shift;
+
+# Resolve these before anything cd's, so a caller can pass paths relative to
+# their own working directory.
+if [ -n "${CONFIG_GUESS_SRC}" ]; then
+  CONFIG_GUESS_SRC="$(expand_path "$(dirname "${CONFIG_GUESS_SRC}")")/$(basename "${CONFIG_GUESS_SRC}")"
+fi
+if [ -n "${CONFIG_SUB_SRC}" ]; then
+  CONFIG_SUB_SRC="$(expand_path "$(dirname "${CONFIG_SUB_SRC}")")/$(basename "${CONFIG_SUB_SRC}")"
+fi
 BDB_VERSION='db-4.8.30.NC'
 BDB_HASH='12edc0df75bf9abd7f82f821795bcee50f42cb2e5f76a6a281b85732798364ef'
 BDB_URL="https://download.oracle.com/berkeley-db/${BDB_VERSION}.tar.gz"
@@ -32,17 +41,27 @@ check_exists() {
 sha256_check() {
   # Args: <sha256_hash> <filename>
   #
+  # Compute the digest and compare it rather than relying on a -c flag: GNU
+  # and BSD builds of these tools disagree about whether a checklist may
+  # arrive on stdin, and macOS 15 ships a BSD sha256sum that rejects it.
   if check_exists sha256sum; then
-    echo "${1}  ${2}" | sha256sum -c
+    sha256_computed="$(sha256sum "${2}" | cut -d' ' -f1)"
+  elif check_exists shasum; then
+    sha256_computed="$(shasum -a 256 "${2}" | cut -d' ' -f1)"
   elif check_exists sha256; then
-    if [ "$(uname)" = "FreeBSD" ]; then
-      sha256 -c "${1}" "${2}"
-    else
-      echo "${1}  ${2}" | sha256 -c
-    fi
+    sha256_computed="$(sha256 -q "${2}")"
   else
-    echo "${1}  ${2}" | shasum -a 256 -c
+    echo "no sha256 utility found" >&2
+    exit 1
   fi
+
+  if [ "${sha256_computed}" != "${1}" ]; then
+    echo "${2}: FAILED" >&2
+    echo "  expected ${1}" >&2
+    echo "  computed ${sha256_computed}" >&2
+    exit 1
+  fi
+  echo "${2}: OK"
 }
 
 http_get() {
@@ -54,7 +73,7 @@ http_get() {
   if [ -f "${2}" ]; then
     echo "File ${2} already exists; not downloading again"
   elif check_exists curl; then
-    curl --insecure --retry 5 "${1}" -o "${2}"
+    curl --insecure --location --fail --retry 5 "${1}" -o "${2}"
   else
     wget --no-check-certificate "${1}" -O "${2}"
   fi
@@ -84,8 +103,19 @@ CONFIG_SUB_HASH='3a4befde9bcdf0fdb2763fc1bfa74e8696df94e1ad7aac8042d133c8ff1d2e3
 rm -f "dist/config.guess"
 rm -f "dist/config.sub"
 
-http_get "${CONFIG_GUESS_URL}" dist/config.guess "${CONFIG_GUESS_HASH}"
-http_get "${CONFIG_SUB_URL}" dist/config.sub "${CONFIG_SUB_HASH}"
+# Callers that already have suitable copies (the depends tree ships a pair)
+# can point at them and skip the download entirely. Savannah rate-limits, so
+# for automated builds this is the difference between a reproducible run and
+# an intermittent one.
+if [ -n "${CONFIG_GUESS_SRC}" ] && [ -n "${CONFIG_SUB_SRC}" ]; then
+  echo "Using local config.guess (${CONFIG_GUESS_SRC}) and config.sub (${CONFIG_SUB_SRC})"
+  cp "${CONFIG_GUESS_SRC}" dist/config.guess
+  cp "${CONFIG_SUB_SRC}" dist/config.sub
+  chmod +x dist/config.guess dist/config.sub
+else
+  http_get "${CONFIG_GUESS_URL}" dist/config.guess "${CONFIG_GUESS_HASH}"
+  http_get "${CONFIG_SUB_URL}" dist/config.sub "${CONFIG_SUB_HASH}"
+fi
 
 cd build_unix/
 

@@ -36,6 +36,19 @@ over `/Applications/Doriancoin-Qt` (macOS) or `doriancoind`/`doriancoin-qt`
 (Linux). No reindex or `-reindex-chainstate` is required: blocks below
 1,359,052 validate bit-for-bit under the old rules.
 
+macOS: opening the app the first time
+-------------------------------------
+
+The `.dmg` is signed ad-hoc, not with an Apple Developer ID, and is therefore
+not notarized. macOS will refuse to open it on the first attempt, reporting
+that it "cannot be opened because Apple cannot check it for malicious
+software". This is expected, and does not indicate a corrupt download --
+verify the download against `SHA256SUMS` and then allow it:
+
+- Open **System Settings > Privacy & Security**, scroll to the message about
+  Doriancoin Core, and click **Open Anyway**; or
+- from a terminal, `xattr -dr com.apple.quarantine /Applications/Doriancoin-Qt.app`.
+
 Notable changes
 ===============
 

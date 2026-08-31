@@ -30,25 +30,34 @@ jobs:
   build-linux-windows:
     name: ${{ matrix.host }}
     runs-on: ubuntu-22.04
-    # boost 1.70 cannot preprocess "#if PTHREAD_STACK_MIN > 0": glibc 2.34
-    # turned that macro into a sysconf() call, so it is no longer a constant
-    # expression and libs/thread fails to build on any modern runner image.
-    # Building on a glibc 2.31 base sidesteps it without patching boost, and
-    # has the side benefit of dropping the released binaries' glibc floor from
-    # 2.35 to 2.31, which is what makes them run on older distros.
-    container: ubuntu:20.04
+    # Only the native Linux hosts need the old base. See matrix.container.
+    container: ${{ matrix.container }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
         include:
+          # boost 1.70 cannot preprocess "#if PTHREAD_STACK_MIN > 0": glibc 2.34
+          # turned that macro into a sysconf() call, so it is no longer a
+          # constant expression and libs/thread fails on any modern image.
+          # A glibc 2.31 base sidesteps it without patching boost, and drops
+          # the released binaries' glibc floor from 2.35 to 2.31.
           - host: x86_64-linux-gnu
+            container: 'ubuntu:20.04'
             packages: ''
             configure_flags: '--enable-reduce-exports'
           - host: aarch64-linux-gnu
+            container: 'ubuntu:20.04'
             packages: 'g++-aarch64-linux-gnu binutils-aarch64-linux-gnu'
             configure_flags: '--enable-reduce-exports'
+          # Windows wants the opposite: no container, so it gets the runner's
+          # newer mingw-w64. Neither reason for the old base applies here --
+          # boost.mk builds mingw32 with threadapi=win32 and never touches the
+          # pthread path, and a Windows binary does not link glibc. Meanwhile
+          # 6f3bbb4bd strips Qt 5.9.8's own TOUCHINPUT typedef so the toolchain
+          # header supplies it, which mingw-w64 7.x on focal does not do.
           - host: x86_64-w64-mingw32
+            container: ''
             packages: 'g++-mingw-w64-x86-64 nsis'
             configure_flags: ''
 
@@ -57,6 +66,7 @@ jobs:
       # to old-releases. Try the stock mirrors first and rewrite only if they
       # have actually gone away.
       - name: Prepare apt sources
+        if: matrix.container != ''
         run: |
           set -e
           export DEBIAN_FRONTEND=noninteractive
@@ -77,7 +87,10 @@ jobs:
       - name: Install build dependencies
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt-get install -y --no-install-recommends \
+          # root inside the container, an unprivileged user on a bare runner
+          SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
             build-essential libtool autotools-dev automake pkg-config bsdmainutils \
             binutils-gold cmake curl ca-certificates python3 python3-setuptools \
             patch bison zip unzip xz-utils libz-dev libbz2-dev \
@@ -88,8 +101,9 @@ jobs:
       - name: Select posix threads for mingw-w64
         if: matrix.host == 'x86_64-w64-mingw32'
         run: |
-          update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
-          update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+          $SUDO update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          $SUDO update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
 
       # Rolling key: every run saves its own entry and restores the newest
       # matching prefix, so a partially built tree is never stranded behind an

@@ -24,6 +24,13 @@ jobs:
   build-linux-windows:
     name: ${{ matrix.host }}
     runs-on: ubuntu-22.04
+    # boost 1.70 cannot preprocess "#if PTHREAD_STACK_MIN > 0": glibc 2.34
+    # turned that macro into a sysconf() call, so it is no longer a constant
+    # expression and libs/thread fails to build on any modern runner image.
+    # Building on a glibc 2.31 base sidesteps it without patching boost, and
+    # has the side benefit of dropping the released binaries' glibc floor from
+    # 2.35 to 2.31, which is what makes them run on older distros.
+    container: ubuntu:20.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -40,21 +47,31 @@ jobs:
             configure_flags: ''
 
     steps:
+      # focal is past end of standard support, so its packages may have moved
+      # to old-releases. Try the stock mirrors first and rewrite only if they
+      # have actually gone away.
+      - name: Prepare apt sources
+        run: |
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update || {
+            sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g; s|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
+            apt-get update
+          }
+          # actions/checkout falls back to a REST tarball without git, which
+          # would leave no .git for genbuild.sh to read the tag from.
+          apt-get install -y --no-install-recommends git ca-certificates
+
       # genbuild.sh stamps the binary with the tag name only when HEAD is the
       # tagged commit, so the full history and tags have to be present.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Free up runner disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
-
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get install -y --no-install-recommends \
             build-essential libtool autotools-dev automake pkg-config bsdmainutils \
             curl ca-certificates python3 patch bison zip ${{ matrix.packages }}
 
@@ -63,8 +80,8 @@ jobs:
       - name: Select posix threads for mingw-w64
         if: matrix.host == 'x86_64-w64-mingw32'
         run: |
-          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
-          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
 
       - name: Cache depends
         uses: actions/cache@v4

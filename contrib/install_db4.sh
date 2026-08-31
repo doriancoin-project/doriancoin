@@ -41,17 +41,27 @@ check_exists() {
 sha256_check() {
   # Args: <sha256_hash> <filename>
   #
+  # Compute the digest and compare it rather than relying on a -c flag: GNU
+  # and BSD builds of these tools disagree about whether a checklist may
+  # arrive on stdin, and macOS 15 ships a BSD sha256sum that rejects it.
   if check_exists sha256sum; then
-    echo "${1}  ${2}" | sha256sum -c
+    sha256_computed="$(sha256sum "${2}" | cut -d' ' -f1)"
+  elif check_exists shasum; then
+    sha256_computed="$(shasum -a 256 "${2}" | cut -d' ' -f1)"
   elif check_exists sha256; then
-    if [ "$(uname)" = "FreeBSD" ]; then
-      sha256 -c "${1}" "${2}"
-    else
-      echo "${1}  ${2}" | sha256 -c
-    fi
+    sha256_computed="$(sha256 -q "${2}")"
   else
-    echo "${1}  ${2}" | shasum -a 256 -c
+    echo "no sha256 utility found" >&2
+    exit 1
   fi
+
+  if [ "${sha256_computed}" != "${1}" ]; then
+    echo "${2}: FAILED" >&2
+    echo "  expected ${1}" >&2
+    echo "  computed ${sha256_computed}" >&2
+    exit 1
+  fi
+  echo "${2}: OK"
 }
 
 http_get() {

@@ -201,7 +201,11 @@ jobs:
           # label has no usable capacity. macos-15-intel is its replacement.
           - runner: macos-15-intel
             arch: x86_64
-            db4_flags: ''
+            # BDB 4.8's x86 inline-assembly probe does not pass under modern
+            # clang, so it degrades to UNIX/fcntl, which offers no shared
+            # latch and is then rejected. Same pthread mutex as arm64; the
+            # host triplet is detected correctly here, so no --build.
+            db4_flags: '--with-mutex=POSIX/pthreads/library'
           # BDB 4.8 predates Apple Silicon twice over. config.guess reports
           # Apple Silicon as "arm-apple-darwin", i.e. 32-bit ARM, so name the
           # build explicitly -- config.sub accepts the aarch64 spelling but

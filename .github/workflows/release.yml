@@ -355,8 +355,17 @@ jobs:
           if [ -z "$dmg" ]; then echo "make deploy produced no .dmg" >&2; exit 1; fi
           mv "$dmg" "out/Doriancoin-Core-${VERSION}-${ARCH}.dmg"
 
-          make install DESTDIR="$PWD/pkg/${DISTNAME}"
-          tar -czf "out/${DISTNAME}-${ARCH}-apple-darwin.tar.gz" -C pkg "${DISTNAME}"
+          # No macOS tarball. These are built against Homebrew rather than
+          # depends, so "make install" output links to /opt/homebrew/... or
+          # /usr/local/... and is loadable only on a machine with the same
+          # formulae installed:
+          #   dyld: Library not loaded: /usr/local/opt/boost/lib/libboost_filesystem.dylib
+          # The .dmg is unaffected because macdeployqtplus copies every
+          # non-system dylib into Contents/Frameworks and rewrites the paths to
+          # @executable_path. v0.21.80 shipped a .dmg only for the same reason,
+          # so nothing is lost by matching it. Shipping a self-contained macOS
+          # tarball would mean relinking the CLI binaries the way the app
+          # bundle is, which is worth doing but is not this change.
           ls -lh out/
 
       - uses: actions/upload-artifact@v4

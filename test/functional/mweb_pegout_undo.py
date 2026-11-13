@@ -77,6 +77,9 @@ class MWEBPegoutUndoTest(BitcoinTestFramework):
         self.log.info('Restored pegout classification also survives a second restart')
         self.restart_node(0)
         self.assert_immature(raw_spend, spend_txid)
+        # Avoid recreating an invalidated block with the same coinbase and
+        # timestamp after the restart resets the miner's extra nonce.
+        node.setmocktime(node.getblockheader(maturity_blocks[-1])['time'] + 1)
         node.generate(4)
         self.assert_immature(raw_spend, spend_txid)
         node.generate(1)

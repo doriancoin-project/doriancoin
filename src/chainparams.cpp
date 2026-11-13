@@ -124,6 +124,9 @@ public:
         consensus.mweb_input_metadata_grandfather_blockhash = uint256S("0x33f61a6c941efd807b2b17f26e61a59ccab2730bc93abf0ce9759d513e08e5af");
         // 3,766 blocks (~6.5 days at 150s) after the 1,359,234 tip on 2026-08-27.
         consensus.mweb_pegout_feature_activation_height = 1'363'000;
+        // 8,064 blocks after the 1,403,786 tip on 2026-11-13 (about two weeks at 150s).
+        // Activation is by height; the calendar date depends on actual block production.
+        consensus.mweb_extradata_feature_activation_height = 1'411'850;
         consensus.frozen_mweb_output_ids = GetFrozenMWEBOutputIDs();
 
         /**
@@ -263,6 +266,7 @@ public:
         consensus.defaultAssumeValid = uint256{}; // testnet is being reset; no assumed-valid block yet
 
         consensus.mweb_pegout_feature_activation_height = 0;
+        consensus.mweb_extradata_feature_activation_height = 0;
         pchMessageStart[0] = 0xd1;
         pchMessageStart[1] = 0xd2;
         pchMessageStart[2] = 0xc0;
@@ -372,6 +376,7 @@ public:
         consensus.nMinimumChainWork = uint256{};
         consensus.defaultAssumeValid = uint256{};
         consensus.mweb_pegout_feature_activation_height = 0;
+        consensus.mweb_extradata_feature_activation_height = 0;
         consensus.frozen_mweb_output_ids = GetFrozenMWEBOutputIDs();
 
         pchMessageStart[0] = 0xd2;

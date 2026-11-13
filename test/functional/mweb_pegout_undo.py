@@ -51,7 +51,7 @@ class MWEBPegoutUndoTest(BitcoinTestFramework):
         raw_spend = node.createrawtransaction(
             [{'txid': hogex.hash, 'vout': pegout_vout}],
             {miner.getnewaddress(): Decimal('0.999')},
-            locktime=0,
+            0,  # locktime: maturity must be the only reason for rejecting the spend.
         )
         signed = miner.signrawtransactionwithwallet(raw_spend)
         assert_equal(signed['complete'], True)

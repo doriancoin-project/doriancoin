@@ -107,6 +107,10 @@ bool CBlockIndexWorkComparator::operator()(const CBlockIndex *pa, const CBlockIn
 
 ChainstateManager g_chainman;
 
+// Serialize block storage and activation so concurrent same-hash bodies
+// cannot connect one representation while retaining another on disk.
+static Mutex g_process_new_block_mutex;
+
 CChainState& ChainstateActive()
 {
     LOCK(::cs_main);
@@ -1329,10 +1333,15 @@ void CChainState::InitCoinsDB(
         leveldb_name, cache_size_bytes, in_memory, should_wipe);
 
     CBlock block;
-    CBlockIndex* pindex = LookupBlockIndex(CoinsDB().GetBestBlock());
-    if (pindex != nullptr) {
-        if (!ReadBlockFromDisk(block, pindex, Params().GetConsensus())) {
-            // MW: TODO - Throw? return error("AppInitMain(): ReadBlockFromDisk() failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
+    {
+        // InitCoinsDB is also used by callers that do not already hold cs_main.
+        // Keep the index protected through the read that uses its disk position.
+        LOCK(cs_main);
+        CBlockIndex* pindex = LookupBlockIndex(CoinsDB().GetBestBlock());
+        if (pindex != nullptr) {
+            if (!ReadBlockFromDisk(block, pindex, Params().GetConsensus())) {
+                // MW: TODO - Throw? return error("AppInitMain(): ReadBlockFromDisk() failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
+            }
         }
     }
 
@@ -2201,13 +2210,13 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
 
     CBlockUndo blockundo;
 
-    // Precomputed transaction data pointers must not be invalidated
-    // until after `control` has run the script checks (potentially
-    // in multiple threads). Preallocate the vector size so a new allocation
-    // doesn't invalidate pointers into the vector, and keep txsdata in scope
-    // for as long as `control`.
-    CCheckQueueControl<CScriptCheck> control(fScriptChecks && g_parallel_script_checks ? &scriptcheckqueue : nullptr);
+    // CScriptCheck objects may hold pointers into txsdata while running in the
+    // script-check queue. txsdata must therefore outlive the CCheckQueueControl
+    // object, whose destructor waits for queued checks to finish on early returns.
+    // Declare txsdata before control so destruction happens in the safe order.
     std::vector<PrecomputedTransactionData> txsdata(block.vtx.size());
+
+    CCheckQueueControl<CScriptCheck> control(fScriptChecks && g_parallel_script_checks ? &scriptcheckqueue : nullptr);
 
     std::vector<int> prevheights;
     CAmount nFees = 0;
@@ -2764,6 +2773,14 @@ bool CChainState::ConnectTip(BlockValidationState& state, const CChainParams& ch
     int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5; nTimeTotal += nTime6 - nTime1;
     LogPrint(BCLog::BENCH, "  - Connect postprocess: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime6 - nTime5) * MILLI, nTimePostConnect * MICRO, nTimePostConnect * MILLI / nBlocksTotal);
     LogPrint(BCLog::BENCH, "- Connect block: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime6 - nTime1) * MILLI, nTimeTotal * MICRO, nTimeTotal * MILLI / nBlocksTotal);
+
+    // The MWEB body is not committed by the block hash and is only fully
+    // checked while connecting it to the MWEB UTXO set. AcceptBlock therefore
+    // defers this signal for MWEB blocks until the exact body has connected.
+    // Signal before moving pthisBlock into the connection trace.
+    if (!IsInitialBlockDownload() && !blockConnecting.mweb_block.IsNull()) {
+        GetMainSignals().NewPoWValidBlock(pindexNew, pthisBlock);
+    }
 
     connectTrace.BlockConnected(pindexNew, std::move(pthisBlock));
     return true;
@@ -4003,8 +4020,10 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, Block
     }
 
     // Header is valid/has work, merkle tree and segwit merkle tree are good...RELAY NOW
-    // (but if it does not build on our best tip, let the SendMessages loop relay it)
-    if (!IsInitialBlockDownload() && m_chain.Tip() == pindex->pprev)
+    // (but if it does not build on our best tip, let the SendMessages loop relay it).
+    // MWEB blocks are deferred to ConnectTip because their bodies are not
+    // committed by the block hash and require UTXO-dependent validation.
+    if (!IsInitialBlockDownload() && m_chain.Tip() == pindex->pprev && block.mweb_block.IsNull())
         GetMainSignals().NewPoWValidBlock(pindex, pblock);
 
     // Write block to history file
@@ -4030,6 +4049,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, Block
 bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock)
 {
     AssertLockNotHeld(cs_main);
+    LOCK(g_process_new_block_mutex);
 
     {
         CBlockIndex *pindex = nullptr;

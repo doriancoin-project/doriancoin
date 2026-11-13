@@ -568,6 +568,64 @@ BOOST_AUTO_TEST_CASE(ccoins_serialization)
     }
 }
 
+BOOST_AUTO_TEST_CASE(txinundo_serialization)
+{
+    CTxUndo undo;
+    undo.vprevout.emplace_back(CTxOut(1, CScript()), 100, false, true);
+    undo.vprevout.emplace_back(CTxOut(2, CScript()), 101, true, false);
+
+    CDataStream stream(SER_DISK, CLIENT_VERSION);
+    stream << undo;
+
+    CTxUndo deserialized;
+    stream >> deserialized;
+
+    BOOST_REQUIRE_EQUAL(deserialized.vprevout.size(), 2U);
+    BOOST_CHECK_EQUAL(deserialized.vprevout[0].nHeight, 100U);
+    BOOST_CHECK(!deserialized.vprevout[0].fCoinBase);
+    BOOST_CHECK(deserialized.vprevout[0].fPegout);
+    BOOST_CHECK_EQUAL(deserialized.vprevout[0].out.nValue, 1);
+    BOOST_CHECK_EQUAL(deserialized.vprevout[1].nHeight, 101U);
+    BOOST_CHECK(deserialized.vprevout[1].fCoinBase);
+    BOOST_CHECK(!deserialized.vprevout[1].fPegout);
+    BOOST_CHECK_EQUAL(deserialized.vprevout[1].out.nValue, 2);
+    BOOST_CHECK(stream.empty());
+}
+
+BOOST_AUTO_TEST_CASE(txinundo_legacy_deserialization)
+{
+    // Pre-pegout undo bytes: two coins at heights 100/101, amounts 1/2,
+    // empty scripts, with only the second marked coinbase. Historical undo
+    // did not retain pegout status, so even a former pegout decodes as false.
+    const auto legacy_bytes = ParseHex("028048000106804b000b06");
+    CDataStream stream(legacy_bytes, SER_DISK, CLIENT_VERSION);
+    CTxUndo undo;
+    stream >> undo;
+    BOOST_CHECK(stream.empty());
+    BOOST_REQUIRE_EQUAL(undo.vprevout.size(), 2U);
+    BOOST_CHECK_EQUAL(undo.vprevout[0].nHeight, 100U);
+    BOOST_CHECK(!undo.vprevout[0].fCoinBase);
+    BOOST_CHECK(!undo.vprevout[0].fPegout);
+    BOOST_CHECK_EQUAL(undo.vprevout[0].out.nValue, 1);
+    BOOST_CHECK(undo.vprevout[0].out.scriptPubKey.empty());
+    BOOST_CHECK_EQUAL(undo.vprevout[1].nHeight, 101U);
+    BOOST_CHECK(undo.vprevout[1].fCoinBase);
+    BOOST_CHECK(!undo.vprevout[1].fPegout);
+    BOOST_CHECK_EQUAL(undo.vprevout[1].out.nValue, 2);
+
+    CDataStream encoded(SER_DISK, CLIENT_VERSION);
+    encoded << undo;
+    BOOST_CHECK_EQUAL(HexStr(encoded), HexStr(legacy_bytes));
+
+    // Deserialization must also clear an existing flag when reusing a Coin.
+    Coin reused(CTxOut(9, CScript()), 1, false, true);
+    CDataStream single(ParseHex("8048000106"), SER_DISK, CLIENT_VERSION);
+    single >> Using<TxInUndoFormatter>(reused);
+    BOOST_CHECK(single.empty());
+    BOOST_CHECK(!reused.fPegout);
+    BOOST_CHECK_EQUAL(reused.nHeight, 100U);
+}
+
 const static COutPoint OUTPOINT;
 const static CAmount SPENT = -1;
 const static CAmount ABSENT = -2;

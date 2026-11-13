@@ -1,5 +1,9 @@
 ACLOCAL_AMFLAGS = -I build-aux/m4
 
+# Prefer configure's generated header over the source-root configuration used
+# by non-Autotools builds, including when building outside the source tree.
+DEFAULT_INCLUDES = -I$(top_builddir)/src -I. -I$(srcdir)
+
 lib_LTLIBRARIES = libsecp256k1.la
 if USE_JNI
 JNI_LIB = libsecp256k1_jni.la

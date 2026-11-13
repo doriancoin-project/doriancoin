@@ -108,9 +108,14 @@ BOOST_AUTO_TEST_CASE(StealthAddresses)
 
     // Set HD seed
     CKey key = DecodeSecret("6usgJoGKXW12i7Ruxy8Z1C5hrRMVGfLmi9NU9uDQJMPXDJ6tQAH");
-    CPubKey seed = keyman.DeriveNewSeed(key);
-    keyman.SetHDSeed(seed);
-    keyman.TopUp();
+    {
+        // Seed setup and keypool generation consult wallet feature flags.
+        // Match production's wallet-before-keystore lock ordering.
+        LOCK(wallet.cs_wallet);
+        CPubKey seed = keyman.DeriveNewSeed(key);
+        keyman.SetHDSeed(seed);
+        BOOST_REQUIRE(keyman.TopUp());
+    }
 
     // Check generated MWEB keychain
     mw::Keychain::Ptr mweb_keychain = keyman.GetMWEBKeychain();
@@ -151,8 +156,11 @@ BOOST_AUTO_TEST_CASE(MalformedMWEBOutputKeys)
     LegacyScriptPubKeyMan& keyman = *wallet.GetOrCreateLegacyScriptPubKeyMan();
 
     CKey seed_key = DecodeSecret("6usgJoGKXW12i7Ruxy8Z1C5hrRMVGfLmi9NU9uDQJMPXDJ6tQAH");
-    keyman.SetHDSeed(keyman.DeriveNewSeed(seed_key));
-    keyman.TopUp();
+    {
+        LOCK(wallet.cs_wallet);
+        keyman.SetHDSeed(keyman.DeriveNewSeed(seed_key));
+        BOOST_REQUIRE(keyman.TopUp());
+    }
 
     mw::Keychain::Ptr mweb_keychain = keyman.GetMWEBKeychain();
     BOOST_REQUIRE(mweb_keychain != nullptr);

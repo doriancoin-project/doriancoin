@@ -116,7 +116,7 @@ class MWEBNoncanonicalFeaturesTest(BitcoinTestFramework):
         block_hash = node.generate(1)[0]
         assert_equal(node.getrawmempool(), [])
         block = FromHex(CBlock(), node.getblock(block_hash, 0))
-        assert any(kernel.features == 32 and kernel.extradata == b'\x01' for kernel in block.mweb_block.body.kernels)
+        assert any(kernel.features == 32 and kernel.extradata == [1] for kernel in block.mweb_block.body.kernels)
 
 
 if __name__ == '__main__':

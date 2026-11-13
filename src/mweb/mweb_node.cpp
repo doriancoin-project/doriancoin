@@ -320,6 +320,18 @@ bool Node::CheckTransaction(const CTransaction& tx, TxValidationState& state)
 
     // If the transaction has MWEB data, call the libmw transaction validation logic.
     if (tx.HasMWEBTx()) {
+        // Keep unmineable kernels out of the mempool even when nonstandard
+        // transactions are accepted. Historical block validation applies its
+        // own activation heights for these canonical feature encodings.
+        for (const Kernel& kernel : tx.mweb_tx.m_transaction->GetKernels()) {
+            if (!kernel.HasCanonicalPegOutFeature()) {
+                return state.Invalid(TxValidationResult::TX_NOT_STANDARD, "bad-mweb-empty-pegout");
+            }
+            if (!kernel.HasCanonicalExtraDataFeature()) {
+                return state.Invalid(TxValidationResult::TX_NOT_STANDARD, "bad-mweb-empty-extradata");
+            }
+        }
+
         try {
             tx.mweb_tx.m_transaction->Validate();
         } catch (const std::exception& e) {

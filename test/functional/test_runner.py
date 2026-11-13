@@ -251,6 +251,7 @@ BASE_SCRIPTS = [
     'mweb_mining.py',
     'mweb_mempool.py',
     'mweb_newpowvalidblock.py',
+    'mweb_noncanonical_features.py',
     'mweb_pegout_undo.py',
     'mweb_reorg.py',
     'mweb_dbcrash.py',

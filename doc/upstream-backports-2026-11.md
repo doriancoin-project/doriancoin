@@ -10,6 +10,8 @@ The mainnet height was selected from the November 13, 2026 explorer snapshot at 
 
 The existing empty-pegout rule remains active at and after **1,363,000**. The existing kernel-lock grandfather boundary also remains **1,363,000**, with block lock-height enforcement strictly above that boundary. The backport does not move either threshold to a Litecoin height.
 
+Mempool admission also rejects empty pegout and extra-data feature vectors when nonstandard transactions are accepted. This closes a testnet mining-template failure found during integration review. It is an admission-policy check; historical block validation retains the activation heights above.
+
 ## Existing data directories and pegout undo
 
 Undo records restore spent outputs when a block is disconnected. Older Doriancoin binaries omitted the `fPegout` flag from these records, so a disk-based disconnect could restore a spent pegout without its maturity classification. The new format preserves that flag in bit 31 of the encoded height/coinbase metadata.

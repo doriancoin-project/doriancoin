@@ -192,6 +192,36 @@ class DeploymentInfo(object):
                     return True
         return False
 
+def getRpaths(binaryPath: str) -> List[str]:
+    otoolbin=os.getenv("OTOOL", "otool")
+    output = subprocess.check_output([otoolbin, "-l", binaryPath], universal_newlines=True)
+    rpaths = []
+    lines = output.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == "cmd LC_RPATH":
+            for follow in lines[i+1:i+4]:
+                follow = follow.strip()
+                if follow.startswith("path "):
+                    rpaths.append(follow[len("path "):].split(" (offset")[0])
+                    break
+    return rpaths
+
+def resolveRpath(name: str, binaryPath: str, sourceDir: Optional[str]) -> Optional[str]:
+    # A deployed copy still carries the rpaths of the library it was copied
+    # from, so @loader_path has to mean the original directory first.
+    loaderDirs = [d for d in (sourceDir, os.path.dirname(binaryPath)) if d is not None]
+    relative = name[len("@rpath/"):]
+    for rpath in getRpaths(binaryPath):
+        for loaderDir in loaderDirs:
+            candidate = os.path.normpath(os.path.join(rpath.replace("@loader_path", loaderDir), relative))
+            if not candidate.startswith("@") and os.path.exists(candidate):
+                return candidate
+    for loaderDir in loaderDirs:
+        candidate = os.path.join(loaderDir, relative)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
 def getFrameworks(binaryPath: str, verbose: int, sourceDir: str = None) -> List[FrameworkInfo]:
     if verbose >= 3:
         print("Inspecting with otool: " + binaryPath)
@@ -223,8 +253,22 @@ def getFrameworks(binaryPath: str, verbose: int, sourceDir: str = None) -> List[
                 line = line.replace("@loader_path", os.path.dirname(binaryPath))
         else:
             line = line.replace("@loader_path", os.path.dirname(binaryPath))
+        # Resolve @rpath against the binary's own LC_RPATH entries. Homebrew
+        # links some libraries this way (brotli: libbrotlidec refers to
+        # @rpath/libbrotlicommon with an rpath of @loader_path/../lib). The
+        # reference inside the binary keeps its @rpath spelling, so remember
+        # it: install_name_tool -change only rewrites an exact match.
+        rpathName = None
+        if line.strip().startswith("@rpath/"):
+            rpathName = line.strip().split(" (")[0]
+            resolvedPath = resolveRpath(rpathName, binaryPath, sourceDir)
+            if resolvedPath is None:
+                raise RuntimeError("Could not resolve {} referenced by {}".format(rpathName, binaryPath))
+            line = line.replace(rpathName, resolvedPath, 1)
         info = FrameworkInfo.fromOtoolLibraryLine(line.strip())
         if info is not None:
+            if rpathName is not None:
+                info.installName = rpathName
             if verbose >= 3:
                 print("Found framework:")
                 print(info)

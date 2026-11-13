@@ -902,7 +902,32 @@ if config.dmg is not None:
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
 
+        # attach can return successfully having created the device nodes but
+        # without mounting the volume, in which case there is no /Volumes
+        # path to find. Seen on the macos-15 arm64 runners. Ask diskutil to
+        # mount the volume rather than failing on a None match.
         m = re.search(r"/Volumes/(.+$)", output)
+        for attempt in range(5):
+            if m is not None:
+                break
+            print("hdiutil attach reported no mount point (attempt {}):".format(attempt + 1))
+            print(output)
+            devices = re.findall(r"^(/dev/disk\d+s\d+)", output, re.MULTILINE)
+            time.sleep(3)
+            for device in reversed(devices):
+                mounted = subprocess.run(["diskutil", "mount", device], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+                print(mounted.stdout)
+                if mounted.returncode == 0:
+                    break
+            info = subprocess.run(["hdiutil", "info"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+            for device in devices:
+                m = re.search(r"^" + re.escape(device) + r"\s.*\t(/Volumes/(.+))$", info, re.MULTILINE)
+                if m is not None:
+                    m = re.search(r"/Volumes/(.+$)", m.group(1))
+                    break
+        if m is None:
+            sys.stderr.write("Could not mount the temporary disk image.\n")
+            sys.exit(1)
         disk_root = m.group(0)
         disk_name = m.group(1)
         

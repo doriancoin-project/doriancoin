@@ -1,6 +1,6 @@
-# November 2026 upstream backports — unreleased
+# November 2026 upstream backports — released in 0.21.83
 
-This document describes the Doriancoin integration of selected Litecoin changes through upstream commit [`9fe73a4bd`](https://github.com/litecoin-project/litecoin/commit/9fe73a4bd1433f9b90ee0ea5fc6e985b6702d343). It is an upgrade note for development builds, not an announcement of a published release. Doriancoin's difficulty algorithms, existing activation heights, chain identity, and release version are retained.
+This document describes the Doriancoin integration of selected Litecoin changes through upstream commit [`9fe73a4bd`](https://github.com/litecoin-project/litecoin/commit/9fe73a4bd1433f9b90ee0ea5fc6e985b6702d343). These changes first ship in Doriancoin Core 0.21.83; see the [release notes](release-notes-doriancoin.md) for the summary. Doriancoin's difficulty algorithms, existing activation heights, and chain identity are retained.
 
 ## Mainnet activation
 
@@ -16,9 +16,17 @@ Mempool admission also rejects empty pegout and extra-data feature vectors when 
 
 Undo records restore spent outputs when a block is disconnected. Older Doriancoin binaries omitted the `fPegout` flag from these records, so a disk-based disconnect could restore a spent pegout without its maturity classification. The new format preserves that flag in bit 31 of the encoded height/coinbase metadata.
 
-The new reader accepts old undo bytes, but cannot reconstruct a flag that was never recorded. This affects **undo for historical pegout spends**, not all UTXOs: the chainstate format already stores `fPegout` for unspent coins. Newly written undo records preserve the flag; upgrading alone does not repair existing records or replace them automatically.
+The new reader accepts old undo bytes, but cannot reconstruct a flag that was never recorded. This affects **undo for pegout spends in blocks connected before the upgrade**, not UTXOs: the chainstate format already stores `fPegout` for unspent coins, and every block connected by the upgraded binary writes undo with the flag.
 
-To regenerate old undo, cleanly shut down the node, back up its wallets, and start the upgraded binary with **`-reindex`**, allowing the full replay to complete. A fresh synchronization with the upgraded binary also generates the corrected records. **`-reindex-chainstate` is insufficient for this repair**: it retains block-index undo positions, and `WriteUndoDataForBlock` does not rewrite records whose undo position already exists. A pruned node may need to redownload missing block history to complete the rebuild.
+**No reindex is required.** Undo is read only when a block is disconnected, so an old record matters only if all of the following happen:
+
+- a reorganisation disconnects a block that was connected *before* the upgrade,
+- that block spent a pegout output created at or below the fork point, and
+- the replacement chain spends the same output again within `PEGOUT_MATURITY` (6 blocks) of its creation, which no standard mempool relays.
+
+Blocks connected before the upgrade are buried under new ones within hours, after which a reorganisation can no longer reach them. Should the case occur anyway, the affected node accepts one block its peers reject and returns to the valid chain as soon as that chain has more work; nothing is marked permanently invalid.
+
+Operators who nevertheless want every historical undo record regenerated — for instance before using `invalidateblock` deep into history — can cleanly shut down, back up wallets, and start once with **`-reindex`**. `-reindex-chainstate` does not do this: it retains block-index undo positions, and `WriteUndoDataForBlock` does not rewrite records whose undo position already exists. A pruned node has to redownload block history to complete a `-reindex`.
 
 Do not reuse new-format undo with an old binary. Its decoder treats bit 31 as part of the height, restoring a flagged coin at a height increased by **2^30** instead of recovering its pegout status. Any downgrade requires a compatible pre-upgrade data backup or a separately rebuilt data directory, as well as consideration of the active consensus rules. Wallet backups alone do not replace the block-index and undo data.
 

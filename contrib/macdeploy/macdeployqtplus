@@ -818,6 +818,24 @@ for p in config.add_resources:
 
 # ------------------------------------------------
 
+# Homebrew installs framework resources (Info.plist, *.prl) read-only, and
+# copying them preserves that. The owner then cannot change extended
+# attributes on them, so the documented way past Gatekeeper,
+#   xattr -dr com.apple.quarantine Doriancoin-Qt.app
+# prints "Permission denied" for every such file and looks like it failed.
+# Mode bits are not part of the code signature, but do this before signing
+# anyway so the signed bundle is the shipped bundle.
+for dirpath, dirnames, filenames in os.walk(target):
+    for name in dirnames + filenames:
+        path = os.path.join(dirpath, name)
+        if os.path.islink(path):
+            continue
+        mode = os.stat(path).st_mode
+        if not mode & stat.S_IWUSR:
+            os.chmod(path, mode | stat.S_IWUSR)
+
+# ------------------------------------------------
+
 # Deploying rewrote every copied dylib's load commands with install_name_tool,
 # which invalidates the ad-hoc signature the linker gave it. arm64 refuses to
 # map a Mach-O whose signature does not match, so the bundle we just assembled

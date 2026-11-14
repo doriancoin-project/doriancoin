@@ -192,6 +192,36 @@ class DeploymentInfo(object):
                     return True
         return False
 
+def getRpaths(binaryPath: str) -> List[str]:
+    otoolbin=os.getenv("OTOOL", "otool")
+    output = subprocess.check_output([otoolbin, "-l", binaryPath], universal_newlines=True)
+    rpaths = []
+    lines = output.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == "cmd LC_RPATH":
+            for follow in lines[i+1:i+4]:
+                follow = follow.strip()
+                if follow.startswith("path "):
+                    rpaths.append(follow[len("path "):].split(" (offset")[0])
+                    break
+    return rpaths
+
+def resolveRpath(name: str, binaryPath: str, sourceDir: Optional[str]) -> Optional[str]:
+    # A deployed copy still carries the rpaths of the library it was copied
+    # from, so @loader_path has to mean the original directory first.
+    loaderDirs = [d for d in (sourceDir, os.path.dirname(binaryPath)) if d is not None]
+    relative = name[len("@rpath/"):]
+    for rpath in getRpaths(binaryPath):
+        for loaderDir in loaderDirs:
+            candidate = os.path.normpath(os.path.join(rpath.replace("@loader_path", loaderDir), relative))
+            if not candidate.startswith("@") and os.path.exists(candidate):
+                return candidate
+    for loaderDir in loaderDirs:
+        candidate = os.path.join(loaderDir, relative)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
 def getFrameworks(binaryPath: str, verbose: int, sourceDir: str = None) -> List[FrameworkInfo]:
     if verbose >= 3:
         print("Inspecting with otool: " + binaryPath)
@@ -223,8 +253,22 @@ def getFrameworks(binaryPath: str, verbose: int, sourceDir: str = None) -> List[
                 line = line.replace("@loader_path", os.path.dirname(binaryPath))
         else:
             line = line.replace("@loader_path", os.path.dirname(binaryPath))
+        # Resolve @rpath against the binary's own LC_RPATH entries. Homebrew
+        # links some libraries this way (brotli: libbrotlidec refers to
+        # @rpath/libbrotlicommon with an rpath of @loader_path/../lib). The
+        # reference inside the binary keeps its @rpath spelling, so remember
+        # it: install_name_tool -change only rewrites an exact match.
+        rpathName = None
+        if line.strip().startswith("@rpath/"):
+            rpathName = line.strip().split(" (")[0]
+            resolvedPath = resolveRpath(rpathName, binaryPath, sourceDir)
+            if resolvedPath is None:
+                raise RuntimeError("Could not resolve {} referenced by {}".format(rpathName, binaryPath))
+            line = line.replace(rpathName, resolvedPath, 1)
         info = FrameworkInfo.fromOtoolLibraryLine(line.strip())
         if info is not None:
+            if rpathName is not None:
+                info.installName = rpathName
             if verbose >= 3:
                 print("Found framework:")
                 print(info)
@@ -774,6 +818,24 @@ for p in config.add_resources:
 
 # ------------------------------------------------
 
+# Homebrew installs framework resources (Info.plist, *.prl) read-only, and
+# copying them preserves that. The owner then cannot change extended
+# attributes on them, so the documented way past Gatekeeper,
+#   xattr -dr com.apple.quarantine Doriancoin-Qt.app
+# prints "Permission denied" for every such file and looks like it failed.
+# Mode bits are not part of the code signature, but do this before signing
+# anyway so the signed bundle is the shipped bundle.
+for dirpath, dirnames, filenames in os.walk(target):
+    for name in dirnames + filenames:
+        path = os.path.join(dirpath, name)
+        if os.path.islink(path):
+            continue
+        mode = os.stat(path).st_mode
+        if not mode & stat.S_IWUSR:
+            os.chmod(path, mode | stat.S_IWUSR)
+
+# ------------------------------------------------
+
 # Deploying rewrote every copied dylib's load commands with install_name_tool,
 # which invalidates the ad-hoc signature the linker gave it. arm64 refuses to
 # map a Mach-O whose signature does not match, so the bundle we just assembled
@@ -858,7 +920,32 @@ if config.dmg is not None:
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
 
+        # attach can return successfully having created the device nodes but
+        # without mounting the volume, in which case there is no /Volumes
+        # path to find. Seen on the macos-15 arm64 runners. Ask diskutil to
+        # mount the volume rather than failing on a None match.
         m = re.search(r"/Volumes/(.+$)", output)
+        for attempt in range(5):
+            if m is not None:
+                break
+            print("hdiutil attach reported no mount point (attempt {}):".format(attempt + 1))
+            print(output)
+            devices = re.findall(r"^(/dev/disk\d+s\d+)", output, re.MULTILINE)
+            time.sleep(3)
+            for device in reversed(devices):
+                mounted = subprocess.run(["diskutil", "mount", device], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+                print(mounted.stdout)
+                if mounted.returncode == 0:
+                    break
+            info = subprocess.run(["hdiutil", "info"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+            for device in devices:
+                m = re.search(r"^" + re.escape(device) + r"\s.*\t(/Volumes/(.+))$", info, re.MULTILINE)
+                if m is not None:
+                    m = re.search(r"/Volumes/(.+$)", m.group(1))
+                    break
+        if m is None:
+            sys.stderr.write("Could not mount the temporary disk image.\n")
+            sys.exit(1)
         disk_root = m.group(0)
         disk_name = m.group(1)
         

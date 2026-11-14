@@ -1,11 +1,10 @@
-Doriancoin Core version 0.21.82 is now available from:
+Doriancoin Core version 0.21.83 is now available from:
 
- <https://github.com/doriancoin-project/doriancoin/releases/tag/v0.21.82>.
+ <https://github.com/doriancoin-project/doriancoin/releases/tag/v0.21.83>.
 
-This is a **mandatory** release. It fixes a consensus bug that halted the
-mainnet chain at height 1,359,051, and it enables a consensus rule change at
-height 1,363,000. Nodes running 0.21.80 or earlier cannot follow the chain past
-1,359,051 and must upgrade.
+This release enables a consensus rule change (a soft fork) at mainnet height
+1,411,850, expected around November 27, 2026, and backports a batch of MWEB
+validation, relay and mempool fixes from Litecoin Core 0.21.5.7 and 0.21.5.8.
 
 Please report bugs using the issue tracker at GitHub:
 
@@ -14,18 +13,24 @@ Please report bugs using the issue tracker at GitHub:
 Upgrade urgency
 ===============
 
-**Critical — upgrade immediately.**
+**High — miners and pools must upgrade before height 1,411,850.**
 
-Two independent deadlines apply:
+The new rule only tightens what a valid block may contain, so every block an
+upgraded miner produces is still accepted by older nodes. Nothing stops
+working at the activation height, but the risk is not shared evenly:
 
-- **Height 1,359,051 (already passed).** The chain stopped here. Only 0.21.82
-  computes the correct difficulty for the blocks that follow, so a 0.21.80 node
-  will reject block 1,359,052 and stay stuck at the old tip.
-- **Height 1,363,000.** New MWEB pegout rules begin enforcement at this height.
-  Nodes that have not upgraded by then may accept blocks the rest of the
-  network rejects.
+- **Miners and pools: required.** A miner still on 0.21.82 can produce a block
+  that upgraded nodes reject, and loses the reward for it.
+- **Exchanges, explorers, and Electrum servers: strongly recommended.** A
+  0.21.82 node will follow a block that breaks the new rule until the upgraded
+  majority builds a longer chain, and may show transactions that are later
+  reversed.
+- **Everyone else: recommended.** The relay, mempool and block-handling fixes
+  below take effect as soon as you upgrade, independent of the activation
+  height.
 
-Mining pools, exchanges, and explorers should upgrade before height 1,363,000.
+Upgraded nodes report `/DoriancoinCore:0.21.83/` to their peers, so
+`getpeerinfo` shows how much of the network has moved.
 
 How to Upgrade
 ==============
@@ -33,8 +38,15 @@ How to Upgrade
 Shut down the old version, wait until it has completely shut down (this may
 take a few minutes on older machines), then run the installer (Windows) or copy
 over `/Applications/Doriancoin-Qt` (macOS) or `doriancoind`/`doriancoin-qt`
-(Linux). No reindex or `-reindex-chainstate` is required: blocks below
-1,359,052 validate bit-for-bit under the old rules.
+(Linux).
+
+**No reindex is required.** See "Pegout status in undo data" below for the one
+narrow case where an operator may choose to run one anyway.
+
+**Do not downgrade to 0.21.82 on the same data directory.** Once 0.21.83 has
+connected blocks, their undo records use a format the older version misreads.
+Going back needs a data directory backup taken before the upgrade, or a fresh
+sync.
 
 macOS: opening the app the first time
 -------------------------------------
@@ -60,158 +72,126 @@ rather than anything wrong with the download; check it against `SHA256SUMS`.
 Notable changes
 ===============
 
-Consensus: ASERT 256-bit overflow fix
--------------------------------------
+Consensus: MWEB extra-data feature activation at height 1,411,850
+-----------------------------------------------------------------
 
-`GetNextWorkRequiredASERT` applied the integer part of the ASERT exponent with
-`nextTarget <<= shifts`. `arith_uint256::operator<<=` silently discards bits
-shifted past bit 255 and gives no overflow signal, so a large positive shift
-wrapped the target to a *tiny* value — the hardest possible difficulty — when
-the mathematically correct answer was the easiest.
+An MWEB kernel that sets the extra-data feature bit must carry non-empty extra
+data. Kernels that set the bit with an empty vector are rejected in blocks at
+and after height 1,411,850 (`consensus.mweb_extradata_feature_activation_height`).
+Testnet and regtest apply the rule from the first MWEB block.
 
-The previous guard only rejected `shifts >= 256`, but the mainnet anchor target
-is 229 bits wide, so bits begin falling off the top at a shift of 28. At a shift
-of 48 the anchor's mantissa clears bit 255 entirely, the value becomes 0, and
-the "target is at least 1" floor turns that into target 1.
+This mirrors the pegout rule that activated at 1,363,000, which is unchanged.
+The wallet has never produced such kernels and they were already non-standard,
+so no ordinary transaction is affected.
 
-Roughly 48 hours of lag behind the ASERT schedule was therefore enough to
-permanently brick the chain, and that is what happened at height 1,359,051: the
-chain was 573,873 seconds (6.64 days) behind schedule, the exponent produced a
-shift of +159, the target wrapped, and `getblocktemplate` began serving an
-unmineable `nBits` of `0x01010000`.
+Both empty-feature kernels are also refused at mempool admission regardless of
+height, including on networks that accept non-standard transactions, so they
+cannot reach a mining template.
 
-Overflow is now detected the way the BCH `aserti3-2d` reference this was derived
-from does — shift back and compare. If bits were lost, the true value exceeds
-`powLimit` anyway, so clamping is exactly equivalent to infinite precision.
+  - `edbee80`: mweb: adapt upstream validation and relay hardening
+  - `68a4885`: mweb: reject noncanonical kernel features at mempool admission
 
-  - `ccb69d7`: consensus: Fix ASERT 256-bit overflow that bricked the chain at 1359051
+MWEB block validation hardening
+-------------------------------
 
-Consensus: ASERT re-anchor at height 1,359,052
-----------------------------------------------
+MWEB block bodies are not committed to by the block hash, so two different
+bodies can share one hash. Several fixes close gaps around that:
 
-With the overflow fixed, ASERT correctly returns `powLimit` for the stalled tip,
-because the chain genuinely was 6.64 days behind its absolute schedule. ASERT
-would then repay that debt honestly — against the network's real hashrate that
-is roughly 4,300 blocks over 6.6 hours, emitting some 108,000 DSV.
+- The exact body being connected is re-checked at connection time, including
+  when it has been reloaded from disk.
+- Kernel data is authenticated against the header the HogEx commits to before
+  any feature bit is acted on, and a body that fails the empty-pegout or
+  empty-extra-data check is treated as mutated rather than permanently
+  invalidating a block hash that may be valid with a different body.
+- Block storage and activation are serialised so one representation cannot be
+  connected while another is kept on disk.
+- Peers that send such bodies in compact blocks are now penalised.
 
-A second anchor is added instead, so the chain restarts with zero schedule debt:
+  - `edbee80`: mweb: adapt upstream validation and relay hardening
 
-    nASERT2Height     = 1359052   (the block that was unmineable)
-    nASERT2AnchorBits = 0x1d027ffd (~0.4 difficulty)
+Pegout status in undo data
+--------------------------
 
-Moving the original `nASERTHeight` would *not* have been a valid way to do this:
-both the dispatcher and the anchor walk key off it, so changing it would
-retroactively re-derive the difficulty of blocks 1,246,001–1,359,051 and
-invalidate the entire existing chain. The first anchor is left untouched and
-history validates bit-for-bit.
+Undo records, which restore spent outputs when a block is disconnected, did
+not store whether an output was a pegout. A pegout restored by a
+reorganisation therefore lost its 6-block maturity requirement. The flag is
+now written with every undo record.
 
-The new schedule's origin is the anchor block's own timestamp rather than its
-parent's — the anchor's parent is the stalled tip, and inheriting that gap would
-reproduce the very debt being cleared.
+Records written by earlier versions cannot be repaired without replaying the
+chain, but they matter only if a reorganisation disconnects a block that was
+connected before the upgrade and the replacement chain re-spends one of its
+pegouts while still immature. Those blocks are out of reach of any realistic
+reorganisation within hours of upgrading, so **no reindex is needed**.
+Operators who want every historical record regenerated can run once with
+`-reindex` (`-reindex-chainstate` is not sufficient). Details are in
+[`doc/upstream-backports-2026-11.md`](upstream-backports-2026-11.md).
 
-`nASERTHalfLife` remains 3600. This chain sees repeated 100x hashrate spikes,
-and because ASERT responds to accumulated schedule deviation rather than elapsed
-time, a longer halflife would let a spike miner extract proportionally more fast
-blocks before difficulty caught up. The halflife was never the bug.
+  - `9bf23bc`: mempool: serialize fPegout in txundo
 
-  - `6ea73cd`: consensus: Re-anchor ASERT at 1359052 to reset the stall debt
+Mempool
+-------
 
-Consensus: MWEB pegout feature activation at height 1,363,000
--------------------------------------------------------------
-
-MWEB kernels that signal a pegout must actually contain at least one pegout.
-Empty pegout features are rejected at and after height 1,363,000
-(`consensus.mweb_pegout_feature_activation_height`). MWEB kernel lock heights
-are now enforced, and a known MWEB-rebalancing output is frozen.
-
-  - `c9c1b3e`: validation: reject empty MWEB pegout features
-  - `d0f2b71`: consensus: Start enforcing kernel lock height
-  - `9019c89`: Consensus: Freeze MWEB-rebalancing output
-  - `68023a9`: consensus: use Doriancoin heights for the MWEB soft forks
-
-Consensus: BIP34 fixes
-----------------------
-
-The BIP34 coinbase height check is exempted for the genesis block, which
-previously broke `-reindex` from scratch, and the testnet BIP34 parameters have
-been corrected. Testnet has been reset to a working state.
-
-  - `bccfab5`: consensus: exempt genesis from the BIP34 coinbase height check
-  - `28b82fe`: consensus: correct testnet BIP34 parameters
-  - `4f4befa`: consensus: reset testnet to a working state
-
-MWEB security hardening
------------------------
-
-A batch of MWEB security fixes backported from Litecoin Core, covering block
-mutation, duplicate pegins, MMR durability, and P2P resource limits:
-
-  - `dfccd41`: validation: preserve descendants of mutated MWEB blocks
-  - `3752878`: Ensure mutated MWEB block doesn't get flagged as BLOCK_CONSENSUS when including frozen output ID
-  - `8bdbab4`: Avoid mutating CoinsView state with invalid block
-  - `14de4c8`: Treat hogex fee and amount mismatches as BLOCK_CONSENSUS errors
-  - `c03e824`: Verify no HogEx flag is set pre-MWEB activation
-  - `87850dd`: Add additional guards against duplicate pegins
-  - `764ae11`: Erase block data for mutated blocks
-  - `1b88564`: Prevent kernel fee overflow
-  - `3ee2dcb`: Fix data corruption issue on PMMR rewind
-  - `86bc144`: Improve file write durability for MMRs
-  - `7d8ec3f`: Open file with update attribute in Commit
-  - `9adeaf0`: Belt-and-suspenders input commitment and pubkey checks
-  - `26c7ac2`: Adding fallbacks for Hash-to-SecretKey edge cases
-  - `19a58dc`: Fix cache leaf bounds check
-  - `f86e1e9`: Update MWEB chainstate in RollforwardBlock
-
-Policy and mempool
-------------------
-
-- `d61f760`: `MAX_STANDARD_TX_WEIGHT` raised from 400,000 to 2,180,000, allowing
-  larger transactions (for example large consolidations) to relay and be mined.
-  This is a policy-only change.
-- `13f33d7`: limit MWEB weight for mempool transactions
-- `dfe0a25`: reject empty MWEB pegout kernels from standard policy
-- `68f46ec`: enforce Ke and Ko pubkey validity
-- `0557c1a`: enforce `IsStandard` for pegout scripts
-- `9834668`: enforce the MWEB input limit in the miner
-- `82425bd`: support `maxfeerate=0` for MWEB transactions in `sendrawtransaction`
-  and `testmempoolaccept`
-
-Wallet: minimal Taproot (P2TR) support
---------------------------------------
-
-`f3bbdd2` adds bech32m address generation and Taproot-aware transaction signing,
-enough for the `ord` ordinals indexer to create inscriptions on Doriancoin.
-`getnewaddress` and `getrawchangeaddress` now accept `"bech32m"`.
-
-This is deliberately minimal. The wallet funds P2TR outputs and preserves
-Taproot witnesses produced by an external signer, but it does not itself perform
-BIP 341 key-path signing, and `bech32m` is excluded from change types and from
-`GetAllDestinationsForKey` to avoid keypool exhaustion.
+- `cfcf847`: MWEB transactions that conflict with a newly connected block --
+  by sharing a kernel or spending an input the block spent -- are now evicted,
+  together with descendants whose inputs no longer exist. Previously they
+  could linger and produce invalid block templates.
+- `6a71b4d`: the miner validates the kernel and stealth sums of the MWEB
+  transactions staged for a block incrementally, and refuses duplicate
+  kernels, so individually valid transactions that cannot be aggregated no
+  longer break the template.
 
 Networking
 ----------
 
-- `0e70f63`: `MAX_PROTOCOL_MESSAGE_LENGTH` increased to 32MB
-- `0e9cf69`: discourage mutated MWEB compact blocks
-- `5dced16`, `1cd9668`: MWEB leafset requests are rate-limited node-wide
+- `edbee80`: a rejected MWEB transaction is no longer remembered in the
+  recent-rejects filter. Its txid and wtxid do not commit to the MWEB payload,
+  so an invalid variant could previously be used to stop a node from accepting
+  the valid transaction with the same identifiers.
+- `edbee80`: fast compact-block announcement of an MWEB block now happens
+  after the block has connected instead of after the header check, because the
+  MWEB body can only be validated against the MWEB UTXO set. Block propagation
+  is marginally slower as a result.
+
+RPC
+---
+
+- `edbee80`: `getmempoolentry` returns an error for an MWEB-only transaction
+  when the node runs with `-rpcserialversion` 0 or 1, instead of returning an
+  entry the client cannot interpret.
+
+Fixes
+-----
+
+- `bc236cc`: precomputed transaction data now outlives the script-check queue
+  on every early-return path in `ConnectBlock`
+- `33266f9`: Bulletproof verification releases its scratch space when a proof
+  contains a malformed point
+- `14dd45d`: file descriptors are closed on all paths of the libmw file copy
+- `8c606e6`: `InitCoinsDB` takes `cs_main` around its block-index lookup
 
 Build and testing
 -----------------
 
-- `598221b`: GitHub Actions CI replaces the stale Travis and Cirrus configs; the
-  full unit and functional suites now run on every push and pull request
-- `ac70dc1`: functional test timeouts scale on CI runners via `--timeout-factor`
-- `0945cd4`: pure-Python RIPEMD-160 for the functional test framework
-- `77488f7`: `doriancoin_scrypt` provided to the functional test framework
-- `2436b39`, `8e333e0`: new `-mwebheight` and `-taprootheight` regtest options
-- `82c094d`: the difficulty bits test is fixed and registered
-- Unit and functional test vectors updated for Doriancoin's parameters
+- `0459f64`, `a452d24`: out-of-tree builds find the libmw test headers and the
+  generated secp256k1-zkp configuration
+- `d4b5de1`: the functional test runner reports failures even when a test's
+  captured output is not valid UTF-8
+- New functional tests `mweb_newpowvalidblock.py`,
+  `mweb_noncanonical_features.py`, `mweb_pegout_undo.py` and
+  `mweb_wtxid_recentrejects.py`; activation-boundary and legacy undo
+  serialisation unit tests
+
+Documentation
+-------------
+
+- `acd42b2`: MWEB protocol documentation under `doc/mweb/` (consensus rules,
+  kernels, serialisation, weight), with Doriancoin's activation heights
 
 Chainparams
 -----------
 
 `nMinimumChainWork`, `defaultAssumeValid`, and `chainTxData` updated to block
-1,360,000.
+1,403,000.
 
 Credits
 =======
@@ -220,6 +200,7 @@ Thanks to everyone who directly contributed to this release:
 
 - [David Burkett](https://github.com/DavidBurkett/)
 - [mboyd1](https://github.com/mboyd1)
+- [xanimo](https://github.com/xanimo)
 
 As well as to everyone that helped with translations on
 [Transifex](https://www.transifex.com/litecoin-project/litecoin/).

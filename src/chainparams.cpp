@@ -118,8 +118,8 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nStartHeight = 2217600; // End Feb 2022
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = 2427264; // 364 days later
 
-        consensus.nMinimumChainWork = uint256S("0x00000000000000000000000000000000000000000000000000217d712ecd0052");
-        consensus.defaultAssumeValid = uint256S("0x675b3c8f148c1050ca9f97f0196442102ab9ac0de2b9241806852b1591584884"); // 1360000
+        consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000021990a578d7466");
+        consensus.defaultAssumeValid = uint256S("0x59f6f2fe02121801863f759946708862039c24fa4e693c5ccf43a721aec3479b"); // 1403000
 
         consensus.mweb_input_metadata_grandfather_blockhash = uint256S("0x33f61a6c941efd807b2b17f26e61a59ccab2730bc93abf0ce9759d513e08e5af");
         // 3,766 blocks (~6.5 days at 150s) after the 1,359,234 tip on 2026-08-27.
@@ -199,10 +199,10 @@ public:
         };
 
         chainTxData = ChainTxData{
-            // Data from rpc: getchaintxstats 4032 675b3c8f148c1050ca9f97f0196442102ab9ac0de2b9241806852b1591584884
-            /* nTime    */ 1788006848,
-            /* nTxCount */ 1844813,
-            /* dTxRate  */ 0.004777888
+            // Data from rpc: getchaintxstats 4032 59f6f2fe02121801863f759946708862039c24fa4e693c5ccf43a721aec3479b
+            /* nTime    */ 1794444384,
+            /* nTxCount */ 1930948,
+            /* dTxRate  */ 0.01337609
         };
     }
 };
